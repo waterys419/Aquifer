@@ -282,7 +282,9 @@ if m:GetAttribute("kind") == "item" then
   m:GetFrameRef("e1"):SetAttribute("item", item)
   m:ClearAllPoints(); m:SetPoint("TOPLEFT", s, "TOPRIGHT", 4, 0)
 else
-  m:ClearAllPoints(); m:SetPoint("BOTTOMLEFT", nav:GetFrameRef("frame"), "BOTTOMLEFT", 8, 40)
+  -- anchor to a secure slot button: the main window is not protected, so the restricted
+  -- environment rejects it as a relative frame ("Invalid relative frame handle", Nov 6)
+  m:ClearAllPoints(); m:SetPoint("TOPLEFT", nav:GetFrameRef("s1"), "TOPLEFT", 4, -4)
 end
 m:SetAttribute("sel", 1)
 m:Show()
