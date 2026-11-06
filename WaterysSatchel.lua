@@ -5,7 +5,7 @@ _G.WaterysSatchel = GB
 
 local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true }
 local MM_DEFAULT = { angle = 215, hide = false }
-local ICON = "Interface\\Icons\\INV_Drink_06"
+local ICON = "Interface\\Icons\\INV_Misc_Bag_21"
 local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 32, 24
 local MAXSLOT = 200
 
