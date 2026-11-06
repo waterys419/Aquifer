@@ -1,5 +1,5 @@
--- Offline harness for Tidepool. Run: lua5.1 tests/runtime.lua
-local source = arg[1] or 'Tidepool.lua'
+-- Offline harness for Waterys Satchel. Run: lua5.1 tests/runtime.lua
+local source = arg[1] or 'WaterysSatchel.lua'
 local combat = false
 local secure = false
 local frames, named = {}, {}
@@ -87,23 +87,23 @@ local function emit(ev,...) for _,f in ipairs(frames) do if f.events[ev] then f.
 local msgs={}
 print=function(m) msgs[#msgs+1]=m end
 
-assert(loadfile(source))('Tidepool')
-TidepoolDB={columns=8}
-emit('ADDON_LOADED','Tidepool')
+assert(loadfile(source))('WaterysSatchel')
+WaterysSatchelDB={columns=8}
+emit('ADDON_LOADED','WaterysSatchel')
 emit('PLAYER_LOGIN')
-local GB=Tidepool
+local GB=WaterysSatchel
 local N=GB.Neighbors
 
 -- 1. grid order: bag 0 slot 1 first, then bag 1, no skipping
 local o=GB.BuildOrder({[0]=2,3,n=2})
 assert(#o==5 and o[1][1]==0 and o[1][2]==1 and o[2][2]==2 and o[3][1]==1 and o[3][2]==1 and o[5][2]==3)
-assert(named.TidepoolSlot1.bag==0 and named.TidepoolSlot1.slot==1)
-assert(named.TidepoolSlot16.bag==0 and named.TidepoolSlot16.slot==16)
-assert(named.TidepoolSlot17.bag==1 and named.TidepoolSlot17.slot==1)
-assert(named.TidepoolSlot28.bag==1 and named.TidepoolSlot28.slot==12 and not named.TidepoolSlot29)
-assert(named.TidepoolSlot1.attrs.item2=='0 1' and named.TidepoolSlot1.attrs.type2=='item')
+assert(named.WaterysSatchelSlot1.bag==0 and named.WaterysSatchelSlot1.slot==1)
+assert(named.WaterysSatchelSlot16.bag==0 and named.WaterysSatchelSlot16.slot==16)
+assert(named.WaterysSatchelSlot17.bag==1 and named.WaterysSatchelSlot17.slot==1)
+assert(named.WaterysSatchelSlot28.bag==1 and named.WaterysSatchelSlot28.slot==12 and not named.WaterysSatchelSlot29)
+assert(named.WaterysSatchelSlot1.attrs.item2=='0 1' and named.WaterysSatchelSlot1.attrs.type2=='item')
 -- visual positions: 8 columns, row by row
-local function xy(i) local p=named['TidepoolSlot'..i].point; return p[4],p[5] end
+local function xy(i) local p=named['WaterysSatchelSlot'..i].point; return p[4],p[5] end
 local x1,y1=xy(1); local x8,y8=xy(8); local x9,y9=xy(9)
 assert(y1==y8 and x9==x1 and y9<y1 and x8>x1)
 
@@ -132,20 +132,20 @@ for _,cfg in ipairs({{16,4},{17,8},{30,8},{40,10},{3,1},{36,6}}) do
 end
 
 -- 3. attributes mirror neighbors for the secure snippet; bag size changes
-assert(named.TidepoolNav.attrs.right8==9 and named.TidepoolNav.attrs.down1==9 and named.TidepoolNav.attrs.left1==28)
+assert(named.WaterysSatchelNav.attrs.right8==9 and named.WaterysSatchelNav.attrs.down1==9 and named.WaterysSatchelNav.attrs.left1==28)
 sizes[2]=6; GB.Layout()
-assert(named.TidepoolSlot34 and named.TidepoolSlot34.bag==2 and named.TidepoolSlot34.slot==6)
-assert(named.TidepoolNav.attrs.count==34)
+assert(named.WaterysSatchelSlot34 and named.WaterysSatchelSlot34.bag==2 and named.WaterysSatchelSlot34.slot==6)
+assert(named.WaterysSatchelNav.attrs.count==34)
 sizes[2]=0; GB.Layout()
-assert(not named.TidepoolSlot29.visible and named.TidepoolSlot29.bag==nil and named.TidepoolNav.attrs.count==28)
-TidepoolDB.columns=4; slashed=true; GB.Slash('cols 6'); assert(TidepoolDB.columns==6 and named.TidepoolNav.attrs.down1==7)
+assert(not named.WaterysSatchelSlot29.visible and named.WaterysSatchelSlot29.bag==nil and named.WaterysSatchelNav.attrs.count==28)
+WaterysSatchelDB.columns=4; slashed=true; GB.Slash('cols 6'); assert(WaterysSatchelDB.columns==6 and named.WaterysSatchelNav.attrs.down1==7)
 GB.Slash('cols 8')
 
 -- 4. secure snippet moves focus and rebinds A / X (d-pad logic, run in combat too)
-local nav=named.TidepoolNav
-nav.refs.hl=named.TidepoolFocus
-GB.Open(); assert(named.TidepoolFrame.visible)
-assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.TidepoolSlot1 and nav.bindings.PAD1[2]=='RightButton')
+local nav=named.WaterysSatchelNav
+nav.refs.hl=named.WaterysSatchelFocus
+GB.Open(); assert(named.WaterysSatchelFrame.visible)
+assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelSlot1 and nav.bindings.PAD1[2]=='RightButton')
 -- Real key press: the binding clicks the pad button once on key DOWN and once on key UP,
 -- but only for the click types the button registered. Returns how many times the move ran.
 local KEY={up='PADDUP',down='PADDDOWN',left='PADDLEFT',right='PADDRIGHT'}
@@ -164,11 +164,11 @@ nav.attrs.focus=1; assert(press('right')==1); assert(nav.attrs.focus==2,'one pre
 nav.attrs.focus=10; assert(press('left')==1); assert(nav.attrs.focus==9,'one slot left')
 nav.attrs.focus=10; assert(press('down')==1); assert(nav.attrs.focus==18,'one row down')
 nav.attrs.focus=18; assert(press('up')==1); assert(nav.attrs.focus==10,'one row up')
-for _,d in ipairs({'up','down','left','right'}) do local c=named['TidepoolPad'..d].clicks; assert(c.AnyUp and not c.AnyDown,d..' registers up only') end
+for _,d in ipairs({'up','down','left','right'}) do local c=named['WaterysSatchelPad'..d].clicks; assert(c.AnyUp and not c.AnyDown,d..' registers up only') end
 -- even if a down click ever reaches the snippet, it must not move
-nav.attrs.focus=5; SecureHandlerExecute(named.TidepoolPadright,named.TidepoolPadright.attrs._onclick,'LeftButton',true); assert(nav.attrs.focus==5)
+nav.attrs.focus=5; SecureHandlerExecute(named.WaterysSatchelPadright,named.WaterysSatchelPadright.attrs._onclick,'LeftButton',true); assert(nav.attrs.focus==5)
 nav.attrs.focus=1
-press('right'); assert(nav.attrs.focus==2 and nav.bindings.PAD1[1]==named.TidepoolSlot2)
+press('right'); assert(nav.attrs.focus==2 and nav.bindings.PAD1[1]==named.WaterysSatchelSlot2)
 press('down'); assert(nav.attrs.focus==10)
 nav.attrs.focus=8; press('right'); assert(nav.attrs.focus==9,'row end wraps to next row')
 nav.attrs.focus=9; press('left'); assert(nav.attrs.focus==8)
@@ -179,84 +179,84 @@ GB.Slash('pad off'); assert(nav.attrs.padnav==0 and not nav.bindings.PADDUP and 
 GB.Slash('pad on'); assert(nav.bindings.PADDUP)
 
 -- 5. open/close via normal bag keys, replaces default bag
-GB.Close(); assert(not named.TidepoolFrame.visible and next(nav.bindings)==nil)
-ToggleAllBags(); assert(named.TidepoolFrame.visible and not ContainerFrame1.visible,'default must be hidden')
-ToggleAllBags(); assert(not named.TidepoolFrame.visible)
-ToggleBackpack(); assert(named.TidepoolFrame.visible)
-CloseAllBags(); assert(not named.TidepoolFrame.visible)
-OpenAllBags(); assert(named.TidepoolFrame.visible); CloseAllBags()
+GB.Close(); assert(not named.WaterysSatchelFrame.visible and next(nav.bindings)==nil)
+ToggleAllBags(); assert(named.WaterysSatchelFrame.visible and not ContainerFrame1.visible,'default must be hidden')
+ToggleAllBags(); assert(not named.WaterysSatchelFrame.visible)
+ToggleBackpack(); assert(named.WaterysSatchelFrame.visible)
+CloseAllBags(); assert(not named.WaterysSatchelFrame.visible)
+OpenAllBags(); assert(named.WaterysSatchelFrame.visible); CloseAllBags()
 ContainerFrame1:Show(); assert(not ContainerFrame1.visible,'default OnShow hidden')
 -- setting off -> default bag returns
-GB.Slash('default on'); assert(TidepoolDB.enabled==false)
+GB.Slash('default on'); assert(WaterysSatchelDB.enabled==false)
 ContainerFrame1:Hide(); defaultShown=false
-ToggleAllBags(); assert(ContainerFrame1.visible and not named.TidepoolFrame.visible)
-GB.Slash('default off'); assert(TidepoolDB.enabled==true); ContainerFrame1:Hide()
+ToggleAllBags(); assert(ContainerFrame1.visible and not named.WaterysSatchelFrame.visible)
+GB.Slash('default off'); assert(WaterysSatchelDB.enabled==true); ContainerFrame1:Hide()
 
 -- 6. combat: normal bag opens; open window keeps working, no protected mutation
 combat=true; defaultShown=false
-ToggleAllBags(); assert(ContainerFrame1.visible and not named.TidepoolFrame.visible)
+ToggleAllBags(); assert(ContainerFrame1.visible and not named.WaterysSatchelFrame.visible)
 combat=false; ContainerFrame1:Hide(); GB.Open()
 combat=true
 items['0:1']={iconFileID=1234,stackCount=5,quality=4}
 emit('BAG_UPDATE')
-assert(named.TidepoolSlot1.icon.texture==1234 and named.TidepoolSlot1.count.text==5)
-assert(named.TidepoolSlot1.border[1]==.6 and named.TidepoolSlot1.border[3]==.9,'quality border')
+assert(named.WaterysSatchelSlot1.icon.texture==1234 and named.WaterysSatchelSlot1.count.text==5)
+assert(named.WaterysSatchelSlot1.border[1]==.6 and named.WaterysSatchelSlot1.border[3]==.9,'quality border')
 items['0:1']=nil; emit('BAG_UPDATE')
-assert(named.TidepoolSlot1.icon.texture==nil and named.TidepoolSlot1.count.text=='')
-named.TidepoolSlot1.scripts.PostClick(named.TidepoolSlot1,'LeftButton'); assert(picked[2]==1)
-sizes[2]=2; emit('BAG_UPDATE'); assert(not named.TidepoolSlot29.visible)
-GB.Slash('cols 5'); assert(TidepoolDB.columns==5)
-combat=false; emit('PLAYER_REGEN_ENABLED'); assert(named.TidepoolSlot29 and named.TidepoolSlot29.visible and nav.attrs.count==30)
+assert(named.WaterysSatchelSlot1.icon.texture==nil and named.WaterysSatchelSlot1.count.text=='')
+named.WaterysSatchelSlot1.scripts.PostClick(named.WaterysSatchelSlot1,'LeftButton'); assert(picked[2]==1)
+sizes[2]=2; emit('BAG_UPDATE'); assert(not named.WaterysSatchelSlot29.visible)
+GB.Slash('cols 5'); assert(WaterysSatchelDB.columns==5)
+combat=false; emit('PLAYER_REGEN_ENABLED'); assert(named.WaterysSatchelSlot29 and named.WaterysSatchelSlot29.visible and nav.attrs.count==30)
 GB.Slash('cols 8'); sizes[2]=0; GB.Layout()
 
 -- 7. Alt+drag move, saved position
-local f=named.TidepoolFrame
+local f=named.WaterysSatchelFrame
 alt=false; f.scripts.OnDragStart(f); assert(not f.moving)
 alt=true; f.scripts.OnDragStart(f); assert(f.moving)
-f.scripts.OnDragStop(f); assert(not f.moving and TidepoolDB.point[1]=='BOTTOMRIGHT')
+f.scripts.OnDragStop(f); assert(not f.moving and WaterysSatchelDB.point[1]=='BOTTOMRIGHT')
 combat=true; f.moving=false; f.scripts.OnDragStart(f); assert(not f.moving); combat=false
 GB.Slash('help'); GB.Slash('config'); GB.Slash('bogus')
 assert(table.concat(msgs,'\n'):find('Unknown'))
-local seenEsc=false for _,n in ipairs(UISpecialFrames) do if n=='TidepoolFrame' then seenEsc=true end end
+local seenEsc=false for _,n in ipairs(UISpecialFrames) do if n=='WaterysSatchelFrame' then seenEsc=true end end
 assert(seenEsc)
 
 
 -- 8. minimap button: placement, drag angle, click actions, hide setting
-local mm=named.TidepoolMinimapButton; assert(mm and mm.parent==Minimap and GridBagDB==nil or true)
+local mm=named.WaterysSatchelMinimapButton; assert(mm and mm.parent==Minimap and TidepoolDB==nil or true)
 local ox,oy=GB.MinimapOffset(0); assert(math.abs(ox-80)<1e-6 and math.abs(oy)<1e-6)
 ox,oy=GB.MinimapOffset(90); assert(math.abs(ox)<1e-6 and math.abs(oy-80)<1e-6)
 assert(math.abs(GB.AngleFromCursor(0,-5)-270)<1e-6 and math.abs(GB.AngleFromCursor(5,5)-45)<1e-6)
 assert(mm.visible and mm.point[1]=='CENTER' and mm.point[2]==Minimap)
-GB.Close(); mm.scripts.OnClick(mm,'LeftButton'); assert(named.TidepoolFrame.visible,'left click opens')
-mm.scripts.OnClick(mm,'LeftButton'); assert(not named.TidepoolFrame.visible,'left click closes')
-mm.scripts.OnClick(mm,'RightButton'); assert(named.TidepoolSettings.visible,'right click opens settings')
-mm.scripts.OnClick(mm,'RightButton'); assert(not named.TidepoolSettings.visible)
+GB.Close(); mm.scripts.OnClick(mm,'LeftButton'); assert(named.WaterysSatchelFrame.visible,'left click opens')
+mm.scripts.OnClick(mm,'LeftButton'); assert(not named.WaterysSatchelFrame.visible,'left click closes')
+mm.scripts.OnClick(mm,'RightButton'); assert(named.WaterysSatchelSettings.visible,'right click opens settings')
+mm.scripts.OnClick(mm,'RightButton'); assert(not named.WaterysSatchelSettings.visible)
 mm.scripts.OnDragStart(mm); assert(mm.scripts.OnUpdate); mm.scripts.OnUpdate(mm)
-assert(math.abs(TidepoolDB.minimap.angle-45)<1e-6,'drag saves angle'); mm.scripts.OnDragStop(mm); assert(not mm.scripts.OnUpdate)
-GB.Slash('minimap off'); assert(TidepoolDB.minimap.hide and not mm.visible)
-GB.Slash('minimap on'); assert(not TidepoolDB.minimap.hide and mm.visible)
-named.TidepoolSettings:Show(); named.TidepoolCheckMinimap.checked=true; named.TidepoolCheckMinimap.scripts.OnClick(named.TidepoolCheckMinimap)
-assert(TidepoolDB.minimap.hide and not mm.visible); GB.SetMinimapHidden(false)
-named.TidepoolColPlus.scripts.OnClick(); assert(TidepoolDB.columns==9); GB.SetCols(8); named.TidepoolSettings:Hide()
+assert(math.abs(WaterysSatchelDB.minimap.angle-45)<1e-6,'drag saves angle'); mm.scripts.OnDragStop(mm); assert(not mm.scripts.OnUpdate)
+GB.Slash('minimap off'); assert(WaterysSatchelDB.minimap.hide and not mm.visible)
+GB.Slash('minimap on'); assert(not WaterysSatchelDB.minimap.hide and mm.visible)
+named.WaterysSatchelSettings:Show(); named.WaterysSatchelCheckMinimap.checked=true; named.WaterysSatchelCheckMinimap.scripts.OnClick(named.WaterysSatchelCheckMinimap)
+assert(WaterysSatchelDB.minimap.hide and not mm.visible); GB.SetMinimapHidden(false)
+named.WaterysSatchelColPlus.scripts.OnClick(); assert(WaterysSatchelDB.columns==9); GB.SetCols(8); named.WaterysSatchelSettings:Hide()
 
 -- 9. money, free slots, search, cooldown, theme
 assert(GB.MoneyText(123456):find('12g') and GB.MoneyText(123456):find('34s') and GB.MoneyText(123456):find('56c'))
 items['0:1']={iconFileID=1,stackCount=1,quality=1,hyperlink='|cff|Hitem:1|h[Water Flask]|h|r'}
 items['0:2']={iconFileID=2,stackCount=1,quality=1,hyperlink='|cff|Hitem:2|h[Iron Sword]|h|r'}
 GB.Open(); GB.Refresh()
-assert(named.TidepoolFrame.children==nil)
+assert(named.WaterysSatchelFrame.children==nil)
 assert(GB.free==26,'free slots count '..tostring(GB.free))
-GB.SetQuery('water'); assert(named.TidepoolSlot1.alpha==1 and named.TidepoolSlot2.alpha<1,'search dims non-matches')
-GB.SetQuery(''); assert(named.TidepoolSlot2.alpha==1)
+GB.SetQuery('water'); assert(named.WaterysSatchelSlot1.alpha==1 and named.WaterysSatchelSlot2.alpha<1,'search dims non-matches')
+GB.SetQuery(''); assert(named.WaterysSatchelSlot2.alpha==1)
 assert(GB.Matches('Water Flask','WAT') and not GB.Matches('Iron','wat') and GB.Matches(nil,''))
 C_Container.GetContainerItemCooldown=function(b,s) if s==1 then return 10,30,1 end return 0,0,1 end
-GB.Refresh(); assert(named.TidepoolSlot1.cd.cooldown[2]==30 and named.TidepoolSlot2.cd.cooldown[2]==0,'cooldown swirl')
+GB.Refresh(); assert(named.WaterysSatchelSlot1.cd.cooldown[2]==30 and named.WaterysSatchelSlot2.cd.cooldown[2]==0,'cooldown swirl')
 -- the d-pad never lands on the search box: nav only references slots
 for i=1,28 do assert(nav.attrs['right'..i]<=28) end
 GB.Close()
 -- 10. migrate GridBag saved settings
-TidepoolDB=nil; GridBagDB={columns=10,scale=1.2}
-emit('ADDON_LOADED','Tidepool'); assert(TidepoolDB.columns==10 and TidepoolDB.scale==1.2 and TidepoolDB.minimap.angle==215 and TidepoolDB.padNav==true)
-TidepoolDB.columns=8
+WaterysSatchelDB=nil; TidepoolDB={columns=10,scale=1.2}
+emit('ADDON_LOADED','WaterysSatchel'); assert(WaterysSatchelDB.columns==10 and WaterysSatchelDB.scale==1.2 and WaterysSatchelDB.minimap.angle==215 and WaterysSatchelDB.padNav==true)
+WaterysSatchelDB.columns=8
 
 io.stdout:write('PASS: one-press-one-slot, minimap, search, money, migration, grid order, neighbors, secure d-pad snippet, open/close/default swap, combat safety, Alt-drag\n')

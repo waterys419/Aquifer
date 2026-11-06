@@ -1,11 +1,11 @@
--- Tidepool: one combined bag as a plain grid, with explicit controller neighbors. (was GridBag)
+-- Waterys Satchel: one combined bag as a plain grid, with explicit controller neighbors. (was GridBag)
 local addonName = ...
 local GB = {}
-_G.Tidepool = GB
+_G.WaterysSatchel = GB
 
 local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true }
 local MM_DEFAULT = { angle = 215, hide = false }
-local ICON = "Interface\\Icons\\Spell_Frost_SummonWaterElemental"
+local ICON = "Interface\\Icons\\INV_Drink_06"
 local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 50, 24
 local MAXSLOT = 200
 
@@ -114,7 +114,7 @@ local function inCombat() return InCombatLockdown() end
 
 -- ---------- slots ----------
 local function makeSlot(i)
-    local b = CreateFrame("Button", "TidepoolSlot" .. i, frame, "SecureActionButtonTemplate,BackdropTemplate")
+    local b = CreateFrame("Button", "WaterysSatchelSlot" .. i, frame, "SecureActionButtonTemplate,BackdropTemplate")
     b:SetSize(SLOT, SLOT)
     b:RegisterForClicks("AnyUp")
     b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
@@ -125,7 +125,7 @@ local function makeSlot(i)
     b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     b.count:SetPoint("BOTTOMRIGHT", -3, 3)
-    b.cd = CreateFrame("Cooldown", "TidepoolCD" .. i, b, "CooldownFrameTemplate")
+    b.cd = CreateFrame("Cooldown", "WaterysSatchelCD" .. i, b, "CooldownFrameTemplate")
     b.cd:SetAllPoints(b.icon)
     b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
     b.index = i
@@ -282,7 +282,7 @@ end
 function GB.Toggle() if GB.IsOpen() then GB.Close() else GB.Open() end end
 
 local function build()
-    frame = CreateFrame("Frame", "TidepoolFrame", UIParent, "BackdropTemplate")
+    frame = CreateFrame("Frame", "WaterysSatchelFrame", UIParent, "BackdropTemplate")
     frame:SetFrameStrata("HIGH")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -296,13 +296,13 @@ local function build()
     if p then frame:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -80, 120) end
     title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", PAD, -8)
-    title:SetText("|cff55ccffTidepool|r")
+    title:SetText("|cff55ccffWaterys Satchel|r")
     freeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     freeText:SetPoint("TOPRIGHT", -PAD, -10)
     moneyText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     moneyText:SetPoint("BOTTOMRIGHT", -PAD, 8)
     -- Search box. Only reachable by mouse/cursor click: the d-pad grid never lands on it.
-    search = CreateFrame("EditBox", "TidepoolSearch", frame, "InputBoxTemplate")
+    search = CreateFrame("EditBox", "WaterysSatchelSearch", frame, "InputBoxTemplate")
     search:SetSize(110, 18)
     search:SetPoint("TOPLEFT", PAD + 62, -6)
     search:SetAutoFocus(false)
@@ -315,10 +315,10 @@ local function build()
     end)
     frame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); savePos() end)
     frame:Hide()
-    tinsert(UISpecialFrames, "TidepoolFrame")
+    tinsert(UISpecialFrames, "WaterysSatchelFrame")
 
-    nav = CreateFrame("Frame", "TidepoolNav", frame, "SecureHandlerBaseTemplate")
-    hl = CreateFrame("Frame", "TidepoolFocus", frame, "BackdropTemplate")
+    nav = CreateFrame("Frame", "WaterysSatchelNav", frame, "SecureHandlerBaseTemplate")
+    hl = CreateFrame("Frame", "WaterysSatchelFocus", frame, "BackdropTemplate")
     hl:SetSize(SLOT + 4, SLOT + 4)
     hl:SetFrameLevel(frame:GetFrameLevel() + 20)
     hl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 3 })
@@ -326,7 +326,7 @@ local function build()
     hl:Hide()
     nav:SetFrameRef("hl", hl)
     for _, d in ipairs({ "up", "down", "left", "right" }) do
-        local btn = CreateFrame("Button", "TidepoolPad" .. d, frame, "SecureHandlerClickTemplate")
+        local btn = CreateFrame("Button", "WaterysSatchelPad" .. d, frame, "SecureHandlerClickTemplate")
         btn:SetAttribute("dir", d)
         btn:SetFrameRef("nav", nav)
         btn:SetAttribute("_onclick", NAV_MOVE)
@@ -355,7 +355,7 @@ end
 
 local function buildMinimap()
     if not Minimap then return end
-    local b = CreateFrame("Button", "TidepoolMinimapButton", Minimap)
+    local b = CreateFrame("Button", "WaterysSatchelMinimapButton", Minimap)
     mmButton = b
     b:SetSize(31, 31)
     b:SetFrameStrata("MEDIUM")
@@ -392,7 +392,7 @@ local function buildMinimap()
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Tidepool")
+        GameTooltip:SetText("Waterys Satchel")
         GameTooltip:AddLine("Left click: open / close bag", 1, 1, 1)
         GameTooltip:AddLine("Right click: settings", 1, 1, 1)
         GameTooltip:AddLine("Drag: move this button", 1, 1, 1)
@@ -406,7 +406,7 @@ function GB.SetMinimapHidden(h) DB.minimap.hide = h and true or false; GB.PlaceM
 
 -- ---------- settings window ----------
 local function buildSettings()
-    local f = CreateFrame("Frame", "TidepoolSettings", UIParent, "BackdropTemplate")
+    local f = CreateFrame("Frame", "WaterysSatchelSettings", UIParent, "BackdropTemplate")
     settings = f
     f:SetSize(220, 190); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
     f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
@@ -415,8 +415,8 @@ local function buildSettings()
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
     f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    t:SetPoint("TOPLEFT", 12, -10); t:SetText("|cff55ccffTidepool|r settings")
-    local close = CreateFrame("Button", "TidepoolSettingsClose", f, "UIPanelCloseButton")
+    t:SetPoint("TOPLEFT", 12, -10); t:SetText("|cff55ccffWaterys Satchel|r settings")
+    local close = CreateFrame("Button", "WaterysSatchelSettingsClose", f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 2, 2)
     local function check(name, y, label, get, set)
         local c = CreateFrame("CheckButton", name, f, "UICheckButtonTemplate")
@@ -428,9 +428,9 @@ local function buildSettings()
         return c
     end
     f.checks = {
-        check("TidepoolCheckMinimap", -34, "Hide minimap icon", function() return DB.minimap.hide end, GB.SetMinimapHidden),
-        check("TidepoolCheckPad", -60, "Controller d-pad in bag", function() return DB.padNav end, function(v) GB.SetPad(v) end),
-        check("TidepoolCheckBag", -86, "Use Tidepool instead of normal bag", function() return DB.enabled end, function(v) GB.SetEnabled(v) end),
+        check("WaterysSatchelCheckMinimap", -34, "Hide minimap icon", function() return DB.minimap.hide end, GB.SetMinimapHidden),
+        check("WaterysSatchelCheckPad", -60, "Controller d-pad in bag", function() return DB.padNav end, function(v) GB.SetPad(v) end),
+        check("WaterysSatchelCheckBag", -86, "Use Waterys Satchel instead of normal bag", function() return DB.enabled end, function(v) GB.SetEnabled(v) end),
     }
     local cl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     cl:SetPoint("TOPLEFT", 14, -126)
@@ -440,14 +440,14 @@ local function buildSettings()
         b:SetSize(26, 22); b:SetPoint("TOPLEFT", x, -148); b:SetText(txt)
         b:SetScript("OnClick", function() GB.SetCols(DB.columns + d); f.refresh() end)
     end
-    colBtn("TidepoolColMinus", 14, "-", -1); colBtn("TidepoolColPlus", 44, "+", 1)
+    colBtn("WaterysSatchelColMinus", 14, "-", -1); colBtn("WaterysSatchelColPlus", 44, "+", 1)
     f.refresh = function()
         cl:SetText("Columns: " .. DB.columns)
         for _, c in ipairs(f.checks) do c.refresh() end
     end
     f:SetScript("OnShow", f.refresh)
     f:Hide()
-    tinsert(UISpecialFrames, "TidepoolSettings")
+    tinsert(UISpecialFrames, "WaterysSatchelSettings")
 end
 function GB.ToggleSettings()
     if not settings then return end
@@ -505,48 +505,48 @@ function GB.SetEnabled(on)
     if not DB.enabled and GB.IsOpen() then GB.Close() end
 end
 
-local function say(m) print("|cff66ccffTidepool|r " .. m) end
+local function say(m) print("|cff66ccffWaterys Satchel|r " .. m) end
 local function slash(msg)
     local cmd, arg = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = cmd:lower()
     if cmd == "" or cmd == "help" then
-        say("/tidepool toggle - open or close the bag (also /tp)")
-        say("/tidepool settings - settings window")
-        say("/tidepool minimap on|off - minimap icon")
-        say("/tidepool search word - grey out other items")
-        say("/tidepool cols 8 - slots per row (4 to 20)")
-        say("/tidepool default on|off - on = use the normal bag again")
-        say("/tidepool pad on|off - controller d-pad moves in the grid")
-        say("/tidepool scale 1 - window size (0.5 to 2)")
-        say("/tidepool reset - put the window back")
-        say("/tidepool config - show settings")
+        say("/satchel toggle - open or close the bag (also /ws)")
+        say("/satchel settings - settings window")
+        say("/satchel minimap on|off - minimap icon")
+        say("/satchel search word - grey out other items")
+        say("/satchel cols 8 - slots per row (4 to 20)")
+        say("/satchel default on|off - on = use the normal bag again")
+        say("/satchel pad on|off - controller d-pad moves in the grid")
+        say("/satchel scale 1 - window size (0.5 to 2)")
+        say("/satchel reset - put the window back")
+        say("/satchel config - show settings")
         say("Alt + drag moves the window.")
     elseif cmd == "toggle" then GB.Toggle()
     elseif cmd == "settings" or cmd == "options" then GB.ToggleSettings()
     elseif cmd == "minimap" then
         local on = arg:lower()
-        if on ~= "on" and on ~= "off" then return say("Use: /tidepool minimap on  or  off") end
+        if on ~= "on" and on ~= "off" then return say("Use: /satchel minimap on  or  off") end
         GB.SetMinimapHidden(on == "off")
         say("Minimap icon: " .. (DB.minimap.hide and "hidden" or "shown"))
     elseif cmd == "search" then GB.SetQuery(arg); if search then search:SetText(arg) end
     elseif cmd == "cols" or cmd == "columns" then
         local v = tonumber(arg)
-        if not v then return say("Use a number, like /tidepool cols 8") end
+        if not v then return say("Use a number, like /satchel cols 8") end
         GB.SetCols(v); say("Columns: " .. DB.columns)
         if pending then say("In combat. Will apply after.") end
     elseif cmd == "default" then
         local on = arg:lower()
-        if on ~= "on" and on ~= "off" then return say("Use: /tidepool default on  or  off") end
+        if on ~= "on" and on ~= "off" then return say("Use: /satchel default on  or  off") end
         GB.SetEnabled(on == "off")
-        say(DB.enabled and "Tidepool bag is ON." or "Normal bag is back. Tidepool is OFF.")
+        say(DB.enabled and "Waterys Satchel bag is ON." or "Normal bag is back. Waterys Satchel is OFF.")
     elseif cmd == "pad" then
         local on = arg:lower()
-        if on ~= "on" and on ~= "off" then return say("Use: /tidepool pad on  or  off") end
+        if on ~= "on" and on ~= "off" then return say("Use: /satchel pad on  or  off") end
         GB.SetPad(on == "on")
         say("Controller d-pad grid: " .. (DB.padNav and "ON" or "OFF"))
     elseif cmd == "scale" then
         local v = tonumber(arg)
-        if not v then return say("Use a number, like /tidepool scale 1") end
+        if not v then return say("Use a number, like /satchel scale 1") end
         DB.scale = math.max(0.5, math.min(2, v))
         if frame then frame:SetScale(DB.scale) end
         say("Scale: " .. DB.scale)
@@ -556,36 +556,39 @@ local function slash(msg)
         frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -80, 120)
         say("Window put back.")
     elseif cmd == "config" then
-        say("Tidepool: " .. (DB.enabled and "ON" or "OFF (normal bag)"))
+        say("Waterys Satchel: " .. (DB.enabled and "ON" or "OFF (normal bag)"))
         say("Columns: " .. DB.columns .. "   Scale: " .. DB.scale)
         say("Controller d-pad grid: " .. (DB.padNav and "ON" or "OFF"))
-    else say("Unknown. Type /tidepool help") end
+    else say("Unknown. Type /satchel help") end
 end
 GB.Slash = slash
-SLASH_TIDEPOOL1 = "/tidepool"
-SLASH_TIDEPOOL2 = "/tp"
-SlashCmdList.TIDEPOOL = slash
+SLASH_WATERYSSATCHEL1 = "/satchel"
+SLASH_WATERYSSATCHEL2 = "/ws"
+SlashCmdList.WATERYSSATCHEL = slash
 
 -- ---------- events ----------
-local ev = CreateFrame("Frame", "TidepoolEvents")
+local ev = CreateFrame("Frame", "WaterysSatchelEvents")
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "BAG_UPDATE", "BAG_UPDATE_DELAYED",
     "ITEM_LOCK_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_MONEY", "BAG_UPDATE_COOLDOWN" }) do ev:RegisterEvent(e) end
 ev:SetScript("OnEvent", function(_, e, a1)
     if e == "ADDON_LOADED" and a1 == addonName then
-        -- Migrate settings from the old GridBag addon (once, only if Tidepool has none yet).
-        if not TidepoolDB then
-            TidepoolDB = {}
-            if type(GridBagDB) == "table" then
-                for k, v in pairs(GridBagDB) do TidepoolDB[k] = v end
+        -- Migrate settings from the old Tidepool or GridBag addon (once, only if it has none yet).
+        if not WaterysSatchelDB then
+            WaterysSatchelDB = {}
+            if type(TidepoolDB) == "table" then
+                for k, v in pairs(TidepoolDB) do WaterysSatchelDB[k] = v end
+            end
+            if next(WaterysSatchelDB) == nil and type(GridBagDB) == "table" then
+                for k, v in pairs(GridBagDB) do WaterysSatchelDB[k] = v end
             end
         end
-        DB = TidepoolDB
+        DB = WaterysSatchelDB
         if type(DB.minimap) ~= "table" then DB.minimap = {} end
         for k, v in pairs(MM_DEFAULT) do if DB.minimap[k] == nil then DB.minimap[k] = v end end
         for k, v in pairs(DEFAULTS) do if DB[k] == nil then DB[k] = v end end
         GB.DB = DB
     elseif e == "PLAYER_LOGIN" then
-        DB = TidepoolDB or DB
+        DB = WaterysSatchelDB or DB
         build(); buildMinimap(); buildSettings(); hookAll()
         GB.Layout()
     elseif e == "PLAYER_REGEN_ENABLED" then
