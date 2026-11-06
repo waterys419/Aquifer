@@ -6,7 +6,7 @@ _G.WaterysSatchel = GB
 local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true }
 local MM_DEFAULT = { angle = 215, hide = false }
 local ICON = "Interface\\Icons\\INV_Drink_06"
-local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 50, 24
+local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 32, 24
 local MAXSLOT = 200
 
 -- ---------- pure layout helpers (tested offline) ----------
@@ -55,7 +55,7 @@ end
 -- Minimap button offset from the minimap centre for an angle in degrees.
 function GB.MinimapOffset(angle, radius)
     local a = math.rad(angle)
-    radius = radius or 80
+    radius = radius or 80   -- caller passes Minimap:GetWidth()/2 + 10 so the button sits on the outer ring
     return math.cos(a) * radius, math.sin(a) * radius
 end
 function GB.AngleFromCursor(dx, dy) return math.deg(math.atan2(dy, dx)) % 360 end
@@ -73,7 +73,7 @@ function GB.Matches(name, query)
 end
 
 -- ---------- state ----------
-local frame, nav, hl, title, moneyText, search, mmButton, settings
+local frame, nav, hl, moneyText, search, mmButton, settings
 local query = ""
 local freeText
 local slots = {}
@@ -294,9 +294,6 @@ local function build()
     frame:SetScale(DB.scale)
     local p = DB.point
     if p then frame:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -80, 120) end
-    title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", PAD, -8)
-    title:SetText("|cff55ccffWaterys Satchel|r")
     freeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     freeText:SetPoint("TOPRIGHT", -PAD, -10)
     moneyText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -304,7 +301,7 @@ local function build()
     -- Search box. Only reachable by mouse/cursor click: the d-pad grid never lands on it.
     search = CreateFrame("EditBox", "WaterysSatchelSearch", frame, "InputBoxTemplate")
     search:SetSize(110, 18)
-    search:SetPoint("TOPLEFT", PAD + 62, -6)
+    search:SetPoint("TOPLEFT", PAD + 6, -6)
     search:SetAutoFocus(false)
     search:SetMaxLetters(40)
     search:SetScript("OnTextChanged", function(self) GB.SetQuery(self:GetText()) end)
@@ -347,7 +344,9 @@ function GB.PlaceMinimap()
     if not mmButton then return end
     local mm = DB.minimap
     if mm.hide then mmButton:Hide(); return end
-    local x, y = GB.MinimapOffset(mm.angle)
+    local w = Minimap.GetWidth and Minimap:GetWidth() or 140
+    if not w or w < 10 then w = 140 end
+    local x, y = GB.MinimapOffset(mm.angle, w / 2 + 10)
     mmButton:ClearAllPoints()
     mmButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
     mmButton:Show()
@@ -415,7 +414,7 @@ local function buildSettings()
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
     f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    t:SetPoint("TOPLEFT", 12, -10); t:SetText("|cff55ccffWaterys Satchel|r settings")
+    t:SetPoint("TOPLEFT", 12, -10); t:SetText("|cff55ccffSettings|r")
     local close = CreateFrame("Button", "WaterysSatchelSettingsClose", f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 2, 2)
     local function check(name, y, label, get, set)
