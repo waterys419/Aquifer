@@ -610,7 +610,7 @@ local function newMenu(kind, defs, parent)
         if secureAction then
             e:SetAttribute("type", "macro")
             e:SetAttribute("macrotext", "")   -- snippet fills "/use <bag> <slot>" when the menu opens
-            SecureHandlerWrapScript(e, "OnClick", m, nil, MENU_SHUT)
+            SecureHandlerWrapScript(e, "OnClick", m, "return nil, true", MENU_SHUT)  -- WoW Forever rejects a nil pre-body; returning a message makes the post-body run
         else
             SetRef(e, "menu", m)
             e:SetAttribute("_onclick", MENU_CLOSE)
