@@ -346,20 +346,75 @@ nav.attrs.focus=2; padclick('PAD4')
 assert(im.visible and not bm.visible and visibleEntries()=='equip,bind,link,destroy',visibleEntries())
 local eqb=named.WaterysSatchelMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
 im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macroLog[1]=='/use 0 2' and not im.visible)
--- Bind: item on cursor
-nav.attrs.focus=1; padclick('PAD1'); im.attrs.sel=3
+-- Bind handoff: all Satchel-owned maps released before the native call.
+nav.attrs.focus=1; padclick('PAD1')
 im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
-do local bound; local hide
-  GamepadActionBarEditFrame={BindItem=function(self,id) bound=id end,HookScript=function(self,ev,fn) if ev=='OnHide' then hide=fn end end}
-  GamepadMode={FrameControlsManager={UnsuspendAllFrames=function() bound='unsuspended' end}}
+do
+  local bound, nativeCall, calls = nil, false, 0
+  local ownerFrame=named.WaterysSatchelFrame
+  local stock={shown=false}
+  function stock:IsShown() return self.shown end
+  function stock:BindItem(id)
+    assert(nativeCall,'BindItem must go through the native barrier, not pcall alone')
+    assert(not ownerFrame.visible and not im.visible and not bm.visible,'stock received input before bag/menu hide')
+    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'owner still captures input') end
+    bound=id;self.shown=true;calls=calls+1
+  end
+  stock.HookScript=function() error('must not hook the stock close path') end
+  GamepadActionBarEditFrame=stock
+  GamepadMode={FrameControlsManager={UnsuspendAllFrames=function() error('must not mutate stock focus manager') end}}
+  securecallfunction=function(fn,...)
+    assert(fn==stock.BindItem,'pass stock method directly, not a closure')
+    nativeCall=true;fn(...);nativeCall=false
+  end
+  -- Include future/unknown chords: clearing the whole owner handles these too.
+  for _,owner in ipairs({nav,im,bm}) do
+    owner.bindings.PADLSHOULDER={'old'};owner.bindings['PADLSHOULDER-PAD1']={'old'}
+    owner.bindings['PADRSHOULDER-PAD4']={'old'}
+  end
   padclick('PAD1')
-  assert(not im.visible and bound==101,'stock BindItem called with itemID')
-  assert(not nav.bindings.PAD1,'our pad bindings dropped while the stock bind dialog is open')
-  assert(hide,'OnHide hook installed'); assert(named.WaterysSatchelFrame.visible); hide(); assert(nav.bindings.PAD1,'pad bindings restored after dialog hides')
+  assert(bound==101 and calls==1 and nav.attrs.bindinghandoff==1)
+  emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall')
+  assert(not WaterysSatchelDB.bindBlocked)
+  emit('ADDON_ACTION_BLOCKED','WaterysSatchel','PlaceAction')
+  assert(WaterysSatchelDB.bindBlocked.action=='PlaceAction','blocked-call diagnostic missing')
+  GB.Open();GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind');GB.PollControllerBind()
+  assert(not ownerFrame.visible and next(nav.bindings)==nil,'bag refresh reclaimed stock input')
+  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1),'duplicate bind')
+  -- Every raw face/d-pad/shoulder key and representative chord is free for stock.
+  for _,key in ipairs({'PADDUP','PADDDOWN','PADDLEFT','PADDRIGHT','PAD1','PAD2','PAD3','PAD4',
+    'PADLSHOULDER','PADRSHOULDER','PADLTRIGGER','PADRTRIGGER','PADLSHOULDER-PAD1','PADRSHOULDER-PAD4'}) do
+    for _,owner in ipairs({nav,im,bm}) do assert(owner.bindings[key]==nil,key..' captured') end
+  end
+  stock.shown=false;combat=true;GB.PollControllerBind()
+  assert(not ownerFrame.visible and nav.attrs.bindinghandoff==1,'restored in combat')
+  combat=false;named.WaterysSatchelEvents.scripts.OnUpdate(nil,.2)
+  assert(ownerFrame.visible and nav.bindings.PAD1 and not nav.attrs.bindinghandoff)
+  -- Native errors and swallowed/no-show errors restore our UI without raw fallbacks.
+  securecallfunction=function() error('simulated failure') end
+  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(ownerFrame.visible and nav.bindings.PAD1)
+  securecallfunction=function() end
+  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(ownerFrame.visible and nav.bindings.PAD1)
+  securecallfunction=nil
+  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(calls==1)
+  securecallfunction=function(fn,...) nativeCall=true;fn(...);nativeCall=false end
+  issecurevariable=function() return false end
+  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(calls==1)
+  issecurevariable=nil
+  combat=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));combat=false
+  stock.shown=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));stock.shown=false
+  items['0:1'].itemID=nil;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));items['0:1'].itemID=101
+  assert(GB.StartControllerBind(named.WaterysSatchelSlot1));GB.SetEnabled(false)
+  stock.shown=false;GB.PollControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
+  GB.SetEnabled(true);GB.Open()
   GamepadActionBarEditFrame=nil
-  local sayLog={}; local oldprint=print; print=function(...) sayLog[#sayLog+1]=table.concat({...},' ') end
-  GB.StartControllerBind({bag=0,slot=1}); print=oldprint; assert(sayLog[1] and sayLog[1]:find('/satchel probe'),'bind message when frame absent')
+  local sayLog={};local savedPrint=print;print=function(...) sayLog[#sayLog+1]=table.concat({...},' ') end
+  GB.StartControllerBind({bag=0,slot=1});print=savedPrint
+  assert(sayLog[1] and sayLog[1]:find('/satchel probe'))
+  securecallfunction=nil;GamepadMode=nil
 end
+io.stdout:write('PASS: stock BindItem handoff, all owners/chords released, hidden bag, rebind guards, native barrier entry, polling restore and failure/combat paths\n')
+
 local oldprint=print
 -- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
 assert(named.WaterysSatchelQuick.attrs.useOnKeyDown==false and eqb.attrs.useOnKeyDown==false and named.WaterysSatchelMenu_item_use.attrs.useOnKeyDown==false)

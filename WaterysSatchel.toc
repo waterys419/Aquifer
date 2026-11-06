@@ -2,7 +2,7 @@
 ## Title: Waterys Satchel
 ## Notes: One plain grid bag. Controller d-pad moves to the slot you see next to you.
 ## Author: Audrey
-## Version: 2.0.0
+## Version: 2.0.1
 ## SavedVariables: WaterysSatchelDB, TidepoolDB, GridBagDB
 
 WaterysSatchel.lua

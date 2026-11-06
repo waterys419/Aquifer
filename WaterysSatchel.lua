@@ -251,7 +251,7 @@ end
 local NAV_REBIND = [[
 local nav = self
 nav:ClearBindings()
-if nav:GetAttribute("padnav") == 1 then
+if nav:GetAttribute("padnav") == 1 and nav:GetAttribute("bindinghandoff") ~= 1 then
   nav:SetBindingClick(true, "PADDUP", nav:GetFrameRef("up"), "LeftButton")
   nav:SetBindingClick(true, "PADDDOWN", nav:GetFrameRef("down"), "LeftButton")
   nav:SetBindingClick(true, "PADDLEFT", nav:GetFrameRef("left"), "LeftButton")
@@ -555,38 +555,55 @@ function GB.OpenChatWith(link)
     if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
     say2(link)
 end
--- Bind on a controller: the stock "Bind to Action Bar" dialog. Read from the client's own UI source:
--- the stock bag, spellbook, character panel and objective tracker all call
---   GamepadMode.FrameControlsManager:UnsuspendAllFrames(); GamepadActionBarEditFrame:BindItem(itemID)
--- (Blizzard_GamepadActionBars/ActionBarEditFrame.lua). That dialog listens for the pad buttons itself,
--- so our override bindings are dropped while it is open and put back when it hides.
-local bindHooked = false
+-- Release only Satchel-owned input before calling the original stock method through
+-- the client's native secure-call barrier. No addon closure or stock script replacement.
+-- Observe closure from our own event frame, never from a hook inside the stock OnHide.
+local bindHandoff, bindFrame, bindWasOpen = false, nil, false
 local function restoreAfterBind()
-    if inCombat() or not (frame and frame:IsShown()) then return end
-    SecureHandlerExecute(nav, "self:RunAttribute('rebind')")
+    if not bindHandoff or inCombat() then return end
+    if bindFrame and bindFrame:IsShown() then return end
+    local reopen = bindWasOpen
+    bindHandoff, bindFrame, bindWasOpen = false, nil, false
+    nav:SetAttribute("bindinghandoff", nil)
+    if reopen and DB.enabled then GB.Open() end
+end
+function GB.PollControllerBind()
+    restoreAfterBind()
 end
 function GB.StartControllerBind(b)
+    if inCombat() or bindHandoff or not (frame and nav and b and b.bag and b.slot) then return false end
     if C_AddOns and C_AddOns.LoadAddOn then pcall(C_AddOns.LoadAddOn, "Blizzard_GamepadActionBars")
     elseif LoadAddOn then pcall(LoadAddOn, "Blizzard_GamepadActionBars") end
     local ef = _G.GamepadActionBarEditFrame
-    if not (ef and ef.BindItem) then
-        say2("Bind: send /satchel probe output to Claude")
+    if not (ef and ef.BindItem and ef.IsShown and securecallfunction) then
+        say2("Bind unavailable: send /satchel probe output after /reload.")
+        return false
+    end
+    if ef:IsShown() then return false end -- Do not replace another stock binding operation.
+    if issecurevariable and not issecurevariable(ef, "BindItem") then
+        say2("Bind needs a fresh /reload; the stock binding method is already tainted.")
         return false
     end
     local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag, b.slot)
     local itemID = info and info.itemID
     if not itemID then return false end
-    if not bindHooked and ef.HookScript then
-        bindHooked = true
-        ef:HookScript("OnHide", restoreAfterBind)
+    DB.bindBlocked = nil
+    bindHandoff, bindFrame, bindWasOpen = true, ef, frame:IsShown()
+    nav:SetAttribute("bindinghandoff", 1)
+    -- Clear entire owner maps, not a guessed list of pad keys. This includes any
+    -- face/shoulder/chord overrides and both menus. Never clear UIParent's bindings.
+    SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
+    SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
+    SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
+    frame:Hide()
+    -- Pass Blizzard's original function directly, not an addon-defined wrapper.
+    -- Do not mutate GamepadMode, its binding stack, or the stock frame's fields.
+    local ok, err = pcall(securecallfunction, ef.BindItem, ef, itemID)
+    if not ok or not ef:IsShown() then
+        say2("Bind did not open. Type /reload and retry." .. (not ok and (" " .. tostring(err)) or ""))
+        restoreAfterBind()
+        return false
     end
-    if not inCombat() then SecureHandlerExecute(nav, "self:ClearBindings()") end
-    local gm = _G.GamepadMode
-    if gm and gm.FrameControlsManager and gm.FrameControlsManager.UnsuspendAllFrames then
-        pcall(gm.FrameControlsManager.UnsuspendAllFrames, gm.FrameControlsManager)
-    end
-    local ok, err = pcall(ef.BindItem, ef, itemID)
-    if not ok then say2("Bind failed: " .. tostring(err)); restoreAfterBind(); return false end
     return true
 end
 local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
@@ -623,6 +640,9 @@ function GB.Probe()
     if line ~= "" then say2(line) end
     local cv = (C_CVar and C_CVar.GetCVar and C_CVar.GetCVar("GamePadEnable")) or (GetCVar and GetCVar("GamePadEnable"))
     add("GamePadEnable=" .. tostring(cv))
+    if DB and DB.bindBlocked then
+        add("Last bind block: " .. DB.bindBlocked.event .. " / " .. DB.bindBlocked.action)
+    end
     if type(C_GamePad) == "table" then add("C_GamePad: " .. table.concat(methodsOf(C_GamePad), ", ")) else add("C_GamePad: absent") end
     local cb = _G.ContainerFrameCombinedBags
     if cb then
@@ -870,7 +890,7 @@ local function savePos()
 end
 
 function GB.Open()
-    if not frame or not DB.enabled then return end
+    if not frame or not DB.enabled or bindHandoff then return end
     if inCombat() then return end
     GB.Layout()
     frame:Show()
@@ -1087,7 +1107,7 @@ local function hookAll()
     local closes = { "CloseAllBags", "CloseBackpack", "CloseBag" }
     local function ours(fn)
         return function()
-            if not DB.enabled or inCombat() then return end -- in combat the normal bag opens
+            if not DB.enabled or inCombat() or bindHandoff then return end -- Leave stock input/focus alone during binding.
             fn(); hideDefault()
         end
     end
@@ -1097,7 +1117,7 @@ local function hookAll()
     for _, name in ipairs(DEFAULT_FRAMES) do
         local f = _G[name]
         if f and f.HookScript then f:HookScript("OnShow", function(self)
-            if DB.enabled and not inCombat() then self:Hide() end
+            if DB.enabled and not inCombat() and not bindHandoff then self:Hide() end
         end) end
     end
 end
@@ -1199,9 +1219,20 @@ SlashCmdList.WATERYSSATCHEL = slash
 
 -- ---------- events ----------
 local ev = CreateFrame("Frame", "WaterysSatchelEvents")
+local bindPollElapsed = 0
+ev:SetScript("OnUpdate", function(_, elapsed)
+    if not bindHandoff then return end
+    bindPollElapsed = bindPollElapsed + (elapsed or 0)
+    if bindPollElapsed >= 0.1 then bindPollElapsed = 0; GB.PollControllerBind() end
+end)
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "BAG_UPDATE", "BAG_UPDATE_DELAYED",
-    "ITEM_LOCK_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_MONEY", "BAG_UPDATE_COOLDOWN" }) do ev:RegisterEvent(e) end
-ev:SetScript("OnEvent", function(_, e, a1)
+    "ITEM_LOCK_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_MONEY", "BAG_UPDATE_COOLDOWN", "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do ev:RegisterEvent(e) end
+ev:SetScript("OnEvent", function(_, e, a1, a2)
+    if (e == "ADDON_ACTION_BLOCKED" or e == "ADDON_ACTION_FORBIDDEN") and bindHandoff and a1 == addonName then
+        DB.bindBlocked = { event = e, action = tostring(a2 or "unknown") }
+        say2("Bind blocked at " .. DB.bindBlocked.action .. ". This is saved in /satchel probe.")
+        return
+    end
     if e == "ADDON_LOADED" and a1 == addonName then
         -- Migrate settings from the old Tidepool or GridBag addon (once, only if it has none yet).
         if not WaterysSatchelDB then

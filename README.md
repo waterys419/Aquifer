@@ -69,3 +69,11 @@ Open it with `/satchel settings` or right-click the minimap button.
 From the repository folder, run `lua5.1 tests/runtime.lua`. It mocks the client and checks grid order, d-pad neighbors, minimap button, search, money and combat safety. In-game checks are still needed.
 
 Author: Audrey
+
+## Bind an item to a controller action bar
+
+Choose **Bind** in an item's menu outside combat. Satchel closes and releases its controller keys before the stock binding dialog opens. Hold the left/right action-bar modifiers to select the desired bar, then press the D-pad or face button. Blizzard's unmodified face slots may be reserved for Interact, Back and similar controls; those slots cannot be overwritten. Cancel or finish binding to return to Satchel. If combat starts, Satchel waits until combat ends before reopening.
+
+After updating, type `/reload` before testing. If a blocked-action warning appears, `/satchel probe` now includes the protected call reported by the game during binding. The addon never changes permanent controller bindings or Blizzard's reserved-slot rules.
+
+Offline checks: `lua5.1 tests/runtime.lua`; with the local Blizzard export available, `lua5.1 tests/stock-bind.lua` also exercises the stock dispatcher and placement utility. These checks cannot validate the native taint engine or physical controller input; an in-game reload and bind test is still required before release.
