@@ -17,7 +17,7 @@ One combined bag, shown as a plain grid, for **WoW: Forever** (client folder `_f
 
 ## Controller d-pad
 
-While the bag is open, the d-pad moves a yellow frame from slot to slot, exactly one slot per press, in the direction you press. The face buttons then use or pick up the item under the frame (`PAD1` is the right click, `PAD3` the left click). Turn this off with `/satchel pad off` or the **Controller d-pad in bag** checkbox.
+While the bag is open, the d-pad moves a yellow frame from slot to slot, exactly one slot per press, in the direction you press. X or Triangle on an item opens its menu (Use, Equip, Bind, Split, Share in Chat, Destroy - only what fits the item). Triangle on an empty slot opens the bag menu (Cleanup, Sell Junk). Square collapses empty slots, Circle closes the menu, then the bag. Turn this off with `/satchel pad off` or the **Controller d-pad in bag** checkbox.
 
 ## Minimap button
 

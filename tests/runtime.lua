@@ -8,15 +8,23 @@ local function protected(f)
     if combat and f.protected and not secure then error('protected frame mutation in combat') end
 end
 local function frame(kind, name, parent, template)
-    local f = setmetatable({kind=kind,name=name,parent=parent,template=template or '',attrs={},scripts={},events={},refs={},visible=false,bindings={}}, {__index=M})
+    local f = setmetatable({kind=kind,name=name,parent=parent,template=template or '',attrs={},scripts={},events={},refs={},visible=false,bindings={}}, {__index=function(t,k) if k=='SetFrameRef' and rawget(t,'noMethodSetFrameRef') then return nil end return M[k] end})
     frames[#frames+1]=f
     if name then named[name]=f; _G[name]=f end
-    if f.template:find('Secure') then local p=f; while p do p.protected=true; p=p.parent end end
+    -- Client rule: only a frame with a secure template is protected (not its parent, not its children).
+    if f.template:find('Secure') then f.protected=true end
+    -- Client rule (WoW Forever): BackdropTemplate wipes the secure template's methods, so a frame created with
+    -- Backdrop + SecureHandler has NO :SetFrameRef (use the global SecureHandlerSetFrameRef).
+    f.noMethodSetFrameRef = f.template:find('Backdrop') and f.template:find('SecureHandler') and true or false
     return f
 end
 function M:SetAttribute(k,v) protected(self);self.attrs[k]=v end
 function M:GetAttribute(k) return self.attrs[k] end
 function M:SetFrameRef(k,v) protected(self);self.refs[k]=v end
+function SecureHandlerSetFrameRef(f,k,v)
+    assert(f.template:find('SecureHandler'),'SecureHandlerSetFrameRef needs a secure handler frame: '..tostring(f.name))
+    protected(f); f.refs[k]=v
+end
 function M:GetFrameRef(k) return self.refs[k] end
 function M:SetScript(k,v) self.scripts[k]=v end
 function M:HookScript(k,v) local o=self.scripts[k]; self.scripts[k]=function(...) if o then o(...) end v(...) end end
@@ -25,7 +33,12 @@ function M:Show() protected(self); if not self.visible then self.visible=true; i
 function M:Hide() protected(self); if self.visible then self.visible=false; if self.scripts.OnHide then self.scripts.OnHide(self) end end end
 function M:IsShown() return self.visible end
 function M:SetSize(w,h) protected(self);self.width=w;self.height=h end
-function M:SetPoint(...) protected(self);self.points=self.points or {};self.points[#self.points+1]={...};self.point={...} end
+function M:SetPoint(...)
+    protected(self)
+    -- Client rule: in the restricted environment a relative anchor must be a protected frame
+    local rel=select(2,...)
+    if secure and type(rel)=='table' and not rel.protected then error('Invalid relative frame handle: '..tostring(rel.name)) end
+self.points=self.points or {};self.points[#self.points+1]={...};self.point={...} end
 function M:GetPoint() return 'BOTTOMRIGHT',nil,'BOTTOMRIGHT',-80,120 end
 function M:ClearAllPoints() protected(self);self.points={} end
 function M:SetText(t) self.text=t end
@@ -52,13 +65,18 @@ for _,k in ipairs({'SetFrameStrata','SetClampedToScreen','SetMovable','EnableMou
 CreateFrame=frame
 UIParent=frame('Frame','UIParent')
 UISpecialFrames={}; SlashCmdList={}
-tinsert=table.insert
+tinsert=table.insert; tremove=table.remove
 local alt=false
 function IsAltKeyDown() return alt end
 function InCombatLockdown() return combat end
-function SecureHandlerExecute(f,snip,button,down)
-    local fn=assert(loadstring(snip));setfenv(fn,setmetatable({self=f,button=button,down=down},{__index=_G}));secure=true;local ok,err=pcall(fn);secure=false;assert(ok,err)
+function SecureHandlerExecute(f,snip,button,down,owner)
+    local fn=assert(loadstring(snip));setfenv(fn,setmetatable({self=f,button=button,down=down,owner=owner},{__index=_G}));secure=true;local ok,err=pcall(fn);secure=false;assert(ok,err)
 end
+function SecureHandlerWrapScript(f,script,header,pre,post)
+    assert(f.protected and header.template:find('SecureHandler'),'WrapScript needs protected frame + secure header')
+    f.wraps=f.wraps or {}; f.wraps[script]={header=header,pre=pre,post=post}
+end
+function M:SetHeight(h) protected(self);self.height=h end
 function M:RunAttribute(k) SecureHandlerExecute(self,self.attrs[k]) end
 function M:SetPoint2() end
 NUM_BAG_SLOTS=4
@@ -147,7 +165,7 @@ GB.Slash('cols 8')
 local nav=named.WaterysSatchelNav
 nav.refs.hl=named.WaterysSatchelFocus
 GB.Open(); assert(named.WaterysSatchelFrame.visible)
-assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelMenuOpen_item and nav.bindings.PAD4[1]==named.WaterysSatchelMenuOpen_bag and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag and nav.bindings.PAD3[1]==named.WaterysSatchelCollapse)
+assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelMenuOpen_x and nav.bindings.PAD4[1]==named.WaterysSatchelMenuOpen_tri and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag and nav.bindings.PAD3[1]==named.WaterysSatchelCollapse)
 -- Real key press: the binding clicks the pad button once on key DOWN and once on key UP,
 -- but only for the click types the button registered. Returns how many times the move ran.
 local KEY={up='PADDUP',down='PADDDOWN',left='PADDLEFT',right='PADDRIGHT'}
@@ -261,48 +279,124 @@ emit('ADDON_LOADED','WaterysSatchel'); assert(WaterysSatchelDB.columns==10 and W
 WaterysSatchelDB.columns=8
 
 
--- 11. controller menus (stock style): X item menu, Triangle bag menu, Circle closes menu then bag
+-- 11. controller menus: X/Triangle on an item -> item menu (per item), Triangle on empty -> bag menu
 local function click(btn,phase) if not btn.attrs._onclick then return end SecureHandlerExecute(btn,btn.attrs._onclick,'LeftButton',phase=='down') end
-local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelMenu_item.bindings[key] or named.WaterysSatchelMenu_bag.bindings[key])[1]; combat=true; click(t,'up'); combat=false; if t.scripts.PostClick then t.scripts.PostClick(t,'LeftButton') end end
-items['0:2']=nil
-items['0:1']={iconFileID=1,stackCount=5,quality=4,hyperlink='|cff|Hitem:1|h[Water Flask]|h|r'}
-GB.Open(); nav.attrs.focus=1
+-- A pad key press = binding click on the bound target (up only), in combat. Runs the _onclick snippet, then the
+-- secure action wrap (post body, owner = header) for macro entries, then PostClick.
+local macroLog={}
+local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelMenu_item.bindings[key] or named.WaterysSatchelMenu_bag.bindings[key])[1]
+    combat=true; click(t,'up')
+    if t.attrs.type=='macro' then macroLog[#macroLog+1]=t.attrs.macrotext
+        local w=t.wraps and t.wraps.OnClick; if w and w.post then SecureHandlerExecute(t,w.post,'LeftButton',false,w.header) end end
+    combat=false
+    if t.scripts.PostClick then t.scripts.PostClick(t,'LeftButton') end end
+-- client rules the mock models
+assert(named.WaterysSatchelMenu_item.noMethodSetFrameRef and named.WaterysSatchelMenu_item.SetFrameRef==nil,'Backdrop+SecureHandler frame has no :SetFrameRef')
+assert(named.WaterysSatchelMenu_item.refs.e1==named.WaterysSatchelMenu_item_use and named.WaterysSatchelMenu_item.refs.nav==nav)
+assert(named.WaterysSatchelFrame.protected,'main window is protected (CLOSE_BAG Hide needs it)')
+assert(not named.WaterysSatchelSettings.protected and not named.WaterysSatchelMinimapButton.protected)
+GB.Open()
 local im=named.WaterysSatchelMenu_item; local bm=named.WaterysSatchelMenu_bag
-assert(#GB.ITEM_MENU==5 and GB.ITEM_MENU[2].label=='Bind' and GB.ITEM_MENU[3].label=='Destroy' and GB.ITEM_MENU[4].label=='Share in Chat' and GB.ITEM_MENU[5].label=='Split')
+local labels={}; for i,d in ipairs(GB.ITEM_MENU) do labels[d.key]=d.label end
+assert(#GB.ITEM_MENU==6 and labels.use=='Use' and labels.equip=='Equip' and labels.bind=='Bind' and labels.split=='Split' and labels.link=='Share in Chat' and labels.destroy=='Destroy')
 assert(GB.BAG_MENU[1].label=='Cleanup' and GB.BAG_MENU[2].label=='Sell Junk')
--- X opens item menu on the focused slot, in combat too
-nav.attrs.focus=1; padclick('PAD1'); assert(im.visible and not nav.bindings.PAD1)
-assert(named.WaterysSatchelMenu_item_use.attrs.item=='0 1' and named.WaterysSatchelMenu_item_use.attrs.type=='item')
-assert(im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_use and im.bindings.PAD2[1]==named.WaterysSatchelMenuClose_item)
--- d-pad down chooses Bind, wraps at the ends
+-- which entries show for which item (pure)
+local eq={['sword']=true}; local spell={['potion']=true,['scroll']=true}; local class0={['potion']=true}
+IsEquippableItem=function(l) return eq[l] or false end
+GetItemSpell=function(l) return spell[l] and 'Heal' or nil end
+GetItemInfoInstant=function(l) return 1,'x','y','z',1,class0[l] and 0 or 7 end
+IsUsableItem=function(l) return l=='quest' end
+local function keys(l,c) local k=GB.ItemMenuKeys(l,c); local o={} for _,d in ipairs(GB.ITEM_MENU) do if k[d.key] then o[#o+1]=d.key end end return table.concat(o,',') end
+assert(keys('potion',5)=='use,bind,split,link,destroy',keys('potion',5))
+assert(keys('sword',1)=='equip,bind,link,destroy',keys('sword',1))
+assert(keys('junk',1)=='bind,link,destroy',keys('junk',1))
+assert(keys('quest',1)=='use,bind,link,destroy')
+assert(keys('ore',20)=='bind,split,link,destroy')
+-- items in the bag
+local function setItem(slot,link,count,q) items['0:'..slot]={iconFileID=slot,stackCount=count,quality=q or 1,hyperlink=link} end
+items={}; setItem(1,'potion',5,1); setItem(2,'sword',1,4); setItem(3,'junk',1,0); GB.Refresh()
+assert(named.WaterysSatchelSlot1.attrs.m_use==1 and named.WaterysSatchelSlot1.attrs.m_split==1 and not named.WaterysSatchelSlot1.attrs.m_equip)
+assert(named.WaterysSatchelSlot2.attrs.m_equip==1 and not named.WaterysSatchelSlot2.attrs.m_use and not named.WaterysSatchelSlot2.attrs.m_split)
+assert(not named.WaterysSatchelSlot4.attrs.hasitem and named.WaterysSatchelSlot1.attrs.hasitem==1)
+local function visibleEntries() local o={} for i=1,6 do local e=im.refs['e'..i]; if e.visible then o[#o+1]=e.attrs.key end end return table.concat(o,',') end
+local function show(key) im.visible=false; for i=1,6 do im.refs['e'..i].visible=true end
+    SecureHandlerExecute(named.WaterysSatchelMenuOpen_x,'',nil,nil) end
+-- X on the potion: item menu with Use, no Equip; Use is a secure macro
+nav.attrs.focus=1; padclick('PAD1')
+assert(im.visible and not nav.bindings.PAD1 and visibleEntries()=='use,bind,split,link,destroy',visibleEntries())
+assert(im.attrs.count==5 and im.height==5*22+10)
+local use=named.WaterysSatchelMenu_item_use
+assert(use.attrs.type=='macro' and use.attrs.macrotext=='/use 0 1' and use.template=='SecureActionButtonTemplate')
+assert(im.bindings.PAD1[1]==use and im.bindings.PAD2[1]==named.WaterysSatchelMenuClose_item)
+-- anchored to a protected frame (the restricted SetPoint check in the mock would have raised otherwise)
+assert(im.point[2]==named.WaterysSatchelSlot1)
+-- d-pad chooses; v-map skips hidden entries; wraps
 local function menupad(m,d) local b=m.bindings[d=='up' and 'PADDUP' or 'PADDDOWN'][1]; combat=true; click(b,'up'); combat=false end
 menupad(im,'down'); assert(im.attrs.sel==2 and im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_bind)
-menupad(im,'up'); menupad(im,'up'); assert(im.attrs.sel==5)
--- confirm Bind: menu closes, pad returns to grid, item goes on cursor
-im.attrs.sel=2; im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
+menupad(im,'up'); menupad(im,'up'); assert(im.attrs.sel==5 and im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_destroy)
+-- USE through the secure click path, in combat: macro text, menu closes, pad returns to the grid
+im.attrs.sel=1; im.bindings.PAD1={use,'LeftButton'}; macroLog={}
+padclick('PAD1'); assert(macroLog[1]=='/use 0 1' and not im.visible and nav.bindings.PAD1,'use clicked, menu closed')
+-- Triangle on the sword: SAME item menu, with Equip (and no Use); macro uses the sword slot
+nav.attrs.focus=2; padclick('PAD4')
+assert(im.visible and not bm.visible and visibleEntries()=='equip,bind,link,destroy',visibleEntries())
+local eqb=named.WaterysSatchelMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
+im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macroLog[1]=='/use 0 2' and not im.visible)
+-- Bind: item on cursor
+nav.attrs.focus=1; padclick('PAD1'); im.attrs.sel=3
+im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
 picked=nil; padclick('PAD1'); assert(not im.visible and nav.bindings.PAD1 and picked and picked[1]==0 and picked[2]==1)
--- Destroy uses the game's confirm popup
+-- Destroy uses the game's confirm popup (rare+ needs typed DELETE)
 local shown; StaticPopup_Show=function(w,l) shown={w,l} end; StaticPopupDialogs={DELETE_ITEM={},DELETE_GOOD_ITEM={}}
-padclick('PAD1'); im.bindings.PAD1={named.WaterysSatchelMenu_item_destroy,'LeftButton'}; padclick('PAD1')
-assert(shown and shown[1]=='DELETE_GOOD_ITEM','epic needs typed confirm: '..tostring(shown and shown[1]))
--- Circle closes the menu first
+nav.attrs.focus=2; setItem(2,'sword',1,4); GB.Refresh(); padclick('PAD1')
+im.bindings.PAD1={named.WaterysSatchelMenu_item_destroy,'LeftButton'}; padclick('PAD1')
+assert(shown and shown[1]=='DELETE_GOOD_ITEM','epic needs typed confirm')
+-- Share + Split
+local linked; ChatEdit_InsertLink=function(l) linked=l end
+nav.attrs.focus=1; padclick('PAD1'); im.bindings.PAD1={named.WaterysSatchelMenu_item_link,'LeftButton'}; padclick('PAD1'); assert(linked=='potion')
+local split; C_Container.SplitContainerItem=function(b,s,n) split={b,s,n} end
+padclick('PAD1'); im.bindings.PAD1={named.WaterysSatchelMenu_item_split,'LeftButton'}; padclick('PAD1'); assert(split and split[3]==2)
+-- Circle closes the menu first, then the bag (restricted Hide of the protected window, in combat)
 padclick('PAD1'); assert(im.visible); padclick('PAD2'); assert(not im.visible and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag)
--- Circle again closes the bag
 padclick('PAD2'); assert(not named.WaterysSatchelFrame.visible,'second Circle closes bag')
--- Triangle bag menu: Cleanup sorts; Sell Junk needs a vendor
-GB.Open(); local sorted=false; C_Container.SortBags=function() sorted=true end
-padclick('PAD4'); assert(bm.visible); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_cleanup,'LeftButton'}; padclick('PAD1'); assert(sorted and not bm.visible)
+-- X on an empty slot: no menu; with an item on the cursor it drops there
+GB.Open(); nav.attrs.focus=5; padclick('PAD1'); assert(not im.visible and not bm.visible)
+CursorHasItem=function() return true end; picked=nil; padclick('PAD1'); assert(picked and picked[2]==5,'X drops cursor item on empty slot'); CursorHasItem=nil
+-- Triangle on an EMPTY slot: bag menu (Cleanup, Sell Junk); anchored to protected slot 1
+local sorted=false; C_Container.SortBags=function() sorted=true end
+nav.attrs.focus=5; padclick('PAD4'); assert(bm.visible and not im.visible and bm.point[2]==named.WaterysSatchelSlot1)
+bm.bindings.PAD1={named.WaterysSatchelMenu_bag_cleanup,'LeftButton'}; padclick('PAD1'); assert(sorted and not bm.visible)
 local sold=false; C_Container.SellAllJunkItems=function() sold=true end
 padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(not sold,'no vendor, no sale')
 MerchantFrame=frame('Frame','MerchantFrame'); MerchantFrame.visible=true
 padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(sold)
 MerchantFrame.visible=false
+-- the bag menu is also reachable from every empty slot, but an item slot never opens it
+nav.attrs.focus=1; padclick('PAD4'); assert(im.visible and not bm.visible); padclick('PAD2')
 -- Square collapses to filled slots and back
-assert(nav.attrs.count==28)
-padclick('PAD3'); assert(WaterysSatchelDB.collapsed and nav.attrs.count==1,'collapsed count '..tostring(nav.attrs.count))
+nav.attrs.focus=1
+padclick('PAD3'); assert(WaterysSatchelDB.collapsed and nav.attrs.count==3,'collapsed count '..tostring(nav.attrs.count))
 padclick('PAD3'); assert(not WaterysSatchelDB.collapsed and nav.attrs.count==28)
--- hint footer text mentions all four
-local h=GB.GridHints(); assert(h:find('Select') and h:find('Collapse') and h:find('Manage Bag') and h:find('Close'))
+-- footer follows the focus: item -> Item Menu, empty -> Bag Menu
+local footer=nil
+nav.attrs.focus=1; GB.UpdateFooter(); local ft=named.WaterysSatchelFrame.scripts.OnShow and true
+local function footerText() for _,f in ipairs(frames) do if f.kind=='FontString' and f.text and f.text:find('Close') and f.text:find('Collapse') then return f.text end end end
+assert(footerText():find('Item Menu') and not footerText():find('Bag Menu'),'item footer: '..tostring(footerText()))
+nav.attrs.focus=5; GB.UpdateFooter(); assert(footerText():find('Bag Menu') and footerText():find('Place'),'empty footer: '..tostring(footerText()))
+-- glyphs: no atlas -> yellow text; with an atlas -> |A markup; manual override
+assert(GB.Glyph('cross'):find('%[X%]') and GB.Glyph('triangle'):find('Tri'))
+C_Texture={GetAtlasInfo=function(a) return a=='Gamepad_Ltr_Cross_64' and {} or nil end}; GB.ResetGlyphs()
+assert(GB.Glyph('cross')=='|A:Gamepad_Ltr_Cross_64:18:18|a' and GB.Glyph('circle'):find('%[O%]'))
+GB.Slash('glyph circle MyCircle'); assert(WaterysSatchelDB.glyph.circle=='MyCircle')
+C_Texture={GetAtlasInfo=function(a) return a=='MyCircle' and {} or nil end}; GB.ResetGlyphs(); assert(GB.Glyph('circle')=='|A:MyCircle:18:18|a')
+GB.Slash('glyphs'); C_Texture=nil; GB.ResetGlyphs()
+assert(GB.MenuHints():find('Select') and GB.MenuHints():find('Close'))
+-- Escape: in UISpecialFrames out of combat, removed in combat (Hide on a protected frame is blocked there)
+emit('PLAYER_REGEN_DISABLED'); local inEsc=false for _,n in ipairs(UISpecialFrames) do if n=='WaterysSatchelFrame' then inEsc=true end end; assert(not inEsc)
+emit('PLAYER_REGEN_ENABLED'); for _,n in ipairs(UISpecialFrames) do if n=='WaterysSatchelFrame' then inEsc=true end end; assert(inEsc)
+-- restricted code must not anchor to the unprotected window (mock models the client rule)
+secure=true; assert(not pcall(named.WaterysSatchelNav.SetPoint,named.WaterysSatchelNav,'TOPLEFT',named.WaterysSatchelSettings),'unprotected relative frame must be rejected'); assert(pcall(named.WaterysSatchelNav.SetPoint,named.WaterysSatchelNav,'TOPLEFT',named.WaterysSatchelSlot1)); secure=false
+assert(not pcall(function() named.WaterysSatchelMenu_item:SetFrameRef('x',nav) end),'no :SetFrameRef on Backdrop+SecureHandler frames')
 GB.Close()
-items['0:1']=nil
+items={}
 io.stdout:write('PASS: one-press-one-slot, minimap, search, money, migration, grid order, neighbors, secure d-pad snippet, open/close/default swap, combat safety, Alt-drag\n')
