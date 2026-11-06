@@ -346,7 +346,19 @@ im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macro
 -- Bind: item on cursor
 nav.attrs.focus=1; padclick('PAD1'); im.attrs.sel=3
 im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
-picked=nil; padclick('PAD1'); assert(not im.visible and nav.bindings.PAD1 and picked and picked[1]==0 and picked[2]==1)
+local sayLog={}; local oldprint=print; print=function(...) sayLog[#sayLog+1]=table.concat({...},' ') end
+padclick('PAD1'); print=oldprint; assert(not im.visible and nav.bindings.PAD1 and sayLog[1] and sayLog[1]:find('/satchel probe'),'bind message')
+-- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
+assert(named.WaterysSatchelQuick.attrs.useOnKeyDown==false and eqb.attrs.useOnKeyDown==false and named.WaterysSatchelMenu_item_use.attrs.useOnKeyDown==false)
+do local q=named.WaterysSatchelQuick; q.attrs.type=nil; q.attrs.macrotext='stale'; nav.attrs.focus=1
+  local w=q.wraps.OnClick; SecureHandlerExecute(q,w.pre,'LeftButton',false,w.header)
+  assert(q.attrs.type=='macro' and q.attrs.macrotext=='/use 0 1','pre-body fills type+macrotext before the click') end
+-- probe prints and saves
+do local lines={}; print=function(...) lines[#lines+1]=table.concat({...},' ') end
+  ContainerFrameCombinedBags=nil; BindFooThing=function() end; C_GamePad={GetDeviceMappedState=function() end}
+  GB.Slash('probe'); print=oldprint
+  assert(#lines>3 and WaterysSatchelDB.probe and #WaterysSatchelDB.probe>2,'probe output saved')
+  local all=table.concat(lines,' '); assert(all:find('BindFooThing') and all:find('C_GamePad')) end
 -- Destroy uses the game's confirm popup (rare+ needs typed DELETE)
 local shown; StaticPopup_Show=function(w,l) shown={w,l} end; StaticPopupDialogs={DELETE_ITEM={},DELETE_GOOD_ITEM={}}
 nav.attrs.focus=2; setItem(2,'sword',1,4); GB.Refresh(); padclick('PAD1')

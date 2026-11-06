@@ -46,7 +46,7 @@ Every command works with `/satchel` or the short `/ws`.
 | `/satchel cols 8` | Slots per row (4 to 20, default 8) |
 | `/satchel scale 1` | Window size (0.5 to 2, default 1) |
 | `/satchel hide on` / `off` | Hide empty slots |
-| `/satchel bindprobe` | List the client's controller-binding functions |
+| `/satchel probe` | List bind / gamepad names in this client (also saved to the SavedVariables) |
 | `/satchel pad on` / `off` | Turn controller d-pad movement on or off |
 | `/satchel default on` / `off` | `on` brings the normal bags back; `off` uses the Satchel |
 | `/satchel reset` | Put the window back at its starting spot |

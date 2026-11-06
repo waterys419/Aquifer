@@ -298,8 +298,10 @@ local f = owner:GetAttribute("focus") or 1
 local s = owner:GetFrameRef("s" .. f)
 local item = s and s:GetAttribute("item2")
 if item and s:GetAttribute("hasitem") and (s:GetAttribute("m_equip") or s:GetAttribute("m_use")) then
+  self:SetAttribute("type", "macro")
   self:SetAttribute("macrotext", "/use " .. item)
 else
+  self:SetAttribute("type", "macro")
   self:SetAttribute("macrotext", "")
 end
 ]]
@@ -345,7 +347,7 @@ if m:GetAttribute("kind") == "item" then
       n = n + 1
       m:SetAttribute("v" .. n, i)
       e:ClearAllPoints(); e:SetPoint("TOPLEFT", m, "TOPLEFT", 5, -5 - (n - 1) * 22); e:Show()
-      if key == "use" or key == "equip" then e:SetAttribute("macrotext", "/use " .. item) end
+      if key == "use" or key == "equip" then e:SetAttribute("type", "macro"); e:SetAttribute("macrotext", "/use " .. item) end
     else e:Hide() end
   end
   if n == 0 then return end
@@ -545,56 +547,69 @@ function GB.OpenChatWith(link)
 end
 -- Bind on a controller: use the stock gamepad binding flow (Blizzard_GamepadSharedUtility:
 -- PromptedBindings / InputBindingStack). The client's UI source is packed, so the entry points are
--- probed at run time; /satchel bindprobe lists what this client really has.
-local BIND_CANDIDATES = {
-    "PromptedBinding_StartForItem", "GamepadBinding_StartForItem", "PromptedBindings_StartForItem",
-    "ContainerFrame_StartGamepadBinding", "ItemButton_StartGamepadBind",
-}
+-- probed at run time; /satchel probe lists what this client really has.
 function GB.StartControllerBind(b)
-    if C_AddOns and C_AddOns.LoadAddOn then pcall(C_AddOns.LoadAddOn, "Blizzard_GamepadSharedUtility")
-    elseif LoadAddOn then pcall(LoadAddOn, "Blizzard_GamepadSharedUtility") end
-    local link = itemLink(b)
-    local g = _G
-    -- 1) the stock item button's own handler, if it exists in this client
-    for _, n in ipairs(BIND_CANDIDATES) do
-        if type(g[n]) == "function" then
-            if pcall(g[n], b.bag, b.slot, link) then return true end
-        end
-    end
-    -- 2) PromptedBindings object with a method taking an item/action
-    for _, objName in ipairs({ "PromptedBindings", "PromptedBinding", "InputBindingStack" }) do
-        local o = g[objName]
-        if type(o) == "table" then
-            for _, m in ipairs({ "StartForItem", "BindItem", "PromptForItem", "StartBindingForItem" }) do
-                if type(o[m]) == "function" then
-                    if pcall(o[m], o, b.bag, b.slot, link) or pcall(o[m], o, link) then return true end
-                end
-            end
-        end
-    end
-    -- 3) fall back to the gamepad action-bar placement: item on cursor, no keyboard screen
-    pickup(b.bag, b.slot)
-    say2("Controller bind: the item is on your cursor. Drop it on a gamepad action-bar slot. (Run /satchel bindprobe and send Claude the output so the real prompt can be wired.)")
+    say2("Bind: send /satchel probe output to Claude")
     return false
 end
-function GB.BindProbe()
-    local found = {}
+local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
+local function probeMatch(k)
+    for _, p in ipairs(PROBE_PAT) do if k:find(p) then return true end end
+    return k:find("Spellbook") and k:find("Bind")
+end
+local function methodsOf(t, pat)
+    local ms = {}
+    for mk, mv in pairs(t) do
+        if type(mk) == "string" and type(mv) == "function" and (not pat or mk:find("Bind") or mk:find("Use")) then ms[#ms + 1] = mk end
+    end
+    table.sort(ms)
+    return ms
+end
+function GB.Probe()
+    local out = {}
+    local function add(l) out[#out + 1] = l; say2(l) end
+    local names = {}
     for k, v in pairs(_G) do
-        if type(k) == "string" and (k:find("Prompted") or k:find("InputBindingStack") or k:find("GamepadBind") or k:find("GamepadBinding")) then
-            found[#found + 1] = k .. "(" .. type(v) .. ")"
+        if type(k) == "string" and probeMatch(k) then
+            local t = type(v)
+            if t == "table" and v.GetObjectType then t = "frame" end
+            names[#names + 1] = k .. "(" .. t .. ")"
         end
     end
-    table.sort(found)
-    say2("bind probe: " .. (#found > 0 and table.concat(found, ", ") or "nothing found (try /reload with the gamepad addon loaded)"))
-    for _, k in ipairs(found) do
-        local n = k:match("^(.-)%(")
-        if type(_G[n]) == "table" then
-            local ms = {}
-            for mk, mv in pairs(_G[n]) do if type(mv) == "function" then ms[#ms + 1] = mk end end
-            table.sort(ms)
-            say2(n .. ": " .. table.concat(ms, ", "))
+    table.sort(names)
+    add("probe: " .. #names .. " global names (full list saved in WaterysSatchelDB.probe)")
+    local line = ""
+    for _, n in ipairs(names) do
+        if #line + #n > 200 then say2(line); line = "" end
+        line = line .. n .. " "
+    end
+    if line ~= "" then say2(line) end
+    local cv = GetCVar and GetCVar("GamePadEnable")
+    add("GamePadEnable=" .. tostring(cv))
+    if type(C_GamePad) == "table" then add("C_GamePad: " .. table.concat(methodsOf(C_GamePad), ", ")) else add("C_GamePad: absent") end
+    local cb = _G.ContainerFrameCombinedBags
+    if cb then
+        local kids = {}
+        if cb.GetChildren then
+            for _, c in ipairs({ cb:GetChildren() }) do kids[#kids + 1] = (c.GetName and c:GetName()) or "?" end
+        end
+        add("CombinedBags children: " .. table.concat(kids, ", "))
+        local items = cb.Items or cb.itemButtons
+        local ib = type(items) == "table" and items[1] or nil
+        if ib then
+            add("item button methods (Bind/Use): " .. table.concat(methodsOf(ib, true), ", "))
+            local mt = getmetatable(ib)
+            if mt and type(mt.__index) == "table" then add("item button mixin (Bind/Use): " .. table.concat(methodsOf(mt.__index, true), ", ")) end
+        else add("CombinedBags: no item button found (open the bag once, then retry)") end
+    else add("ContainerFrameCombinedBags: absent") end
+    for _, n in ipairs(names) do
+        local k = n:match("^(.-)%(")
+        if type(_G[k]) == "table" and not _G[k].GetObjectType then
+            local ms = methodsOf(_G[k])
+            if #ms > 0 then add(k .. ": " .. table.concat(ms, ", ")) end
         end
     end
+    if DB then DB.probe = out; DB.probe[#DB.probe + 1] = table.concat(names, " ") end
 end
 -- Non-secure menu actions. They never touch protected frames.
 GB.MenuActions = {
@@ -712,6 +727,7 @@ local function newMenu(kind, defs, parent)
         e.def = def
         if secureAction then
             e:SetAttribute("type", "macro")
+            e:SetAttribute("useOnKeyDown", false)
             e:SetAttribute("macrotext", "")   -- snippet fills "/use <bag> <slot>" when the menu opens
             SecureHandlerWrapScript(e, "OnClick", m, "return nil, true", MENU_SHUT)  -- WoW Forever rejects a nil pre-body; returning a message makes the post-body run
         else
@@ -792,6 +808,7 @@ local function buildMenu(parent)
     local qa = CreateFrame("Button", "WaterysSatchelQuick", parent, "SecureActionButtonTemplate,SecureHandlerBaseTemplate")
     qa:RegisterForClicks("AnyUp")
     qa:SetAttribute("type", "macro")
+    qa:SetAttribute("useOnKeyDown", false)   -- we register up-clicks only; with ActionButtonUseKeyDown=1 the secure handler would otherwise ignore them
     qa:SetAttribute("macrotext", "")
     SecureHandlerWrapScript(qa, "OnClick", nav, QUICK_PRE)
     GB.quickBtn = qa
@@ -1083,7 +1100,7 @@ local function slash(msg)
         say("Controller (PlayStation): X or Triangle on an item = item menu (Use, Equip, Bind, Split, Share, Destroy); Triangle on an empty slot = bag menu (Cleanup, Sell Junk, Hide empty slots); Square = quick Equip/Use; Circle = close; d-pad = move.")
         say("/satchel glyphs - show which button pictures were found; /satchel glyph cross AtlasName sets one")
         say("/satchel hide on|off - hide empty slots (also a tick box in settings and an entry in the Triangle bag menu)")
-        say("/satchel bindprobe - list the client's controller-binding functions")
+        say("/satchel probe - list the client's bind / gamepad names (send to Claude)")
         say("/satchel config - show settings")
         say("Alt + drag moves the window.")
     elseif cmd == "toggle" then GB.Toggle()
@@ -1120,8 +1137,8 @@ local function slash(msg)
         DB.point = nil; frame:ClearAllPoints()
         frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -80, 120)
         say("Window put back.")
-    elseif cmd == "bindprobe" then
-        GB.BindProbe()
+    elseif cmd == "probe" or cmd == "bindprobe" then
+        GB.Probe()
     elseif cmd == "hide" then
         GB.SetCollapsed(arg == "on" or (arg ~= "off" and not DB.collapsed)); say("Hide empty slots: " .. (DB.collapsed and "ON" or "OFF"))
     elseif cmd == "glyphs" then
