@@ -303,10 +303,13 @@ assert(#GB.ITEM_MENU==6 and labels.use=='Use' and labels.equip=='Equip' and labe
 assert(GB.BAG_MENU[1].label=='Cleanup' and GB.BAG_MENU[2].label=='Sell Junk')
 -- which entries show for which item (pure)
 local eq={['sword']=true}; local spell={['potion']=true,['scroll']=true}; local class0={['potion']=true}
-IsEquippableItem=function(l) return eq[l] or false end
-GetItemSpell=function(l) return spell[l] and 'Heal' or nil end
-GetItemInfoInstant=function(l) return 1,'x','y','z',1,class0[l] and 0 or 7 end
-IsUsableItem=function(l) return l=='quest' end
+-- this client has ONLY C_Item.* (no globals): model that
+IsEquippableItem,GetItemSpell,GetItemInfoInstant,IsUsableItem,GetItemInfo=nil,nil,nil,nil,nil
+C_Item={IsEquippableItem=function(l) return eq[l] or false end,
+ GetItemSpell=function(l) return spell[l] and 'Heal' or nil end,
+ GetItemInfoInstant=function(l) return 1,'x','y','z',1,class0[l] and 0 or 7 end,
+ IsUsableItem=function(l) return l=='quest' end,
+ GetItemInfo=function(l) return l:match('%[(.-)%]') end}
 local function keys(l,c) local k=GB.ItemMenuKeys(l,c); local o={} for _,d in ipairs(GB.ITEM_MENU) do if k[d.key] then o[#o+1]=d.key end end return table.concat(o,',') end
 assert(keys('potion',5)=='use,bind,split,link,destroy',keys('potion',5))
 assert(keys('sword',1)=='equip,bind,link,destroy',keys('sword',1))
@@ -314,7 +317,7 @@ assert(keys('junk',1)=='bind,link,destroy',keys('junk',1))
 assert(keys('quest',1)=='use,bind,link,destroy')
 assert(keys('ore',20)=='bind,split,link,destroy')
 -- items in the bag
-local function setItem(slot,link,count,q) items['0:'..slot]={iconFileID=slot,stackCount=count,quality=q or 1,hyperlink=link} end
+local function setItem(slot,link,count,q) items['0:'..slot]={iconFileID=slot,stackCount=count,quality=q or 1,hyperlink=link,itemID=100+slot} end
 items={}; setItem(1,'potion',5,1); setItem(2,'sword',1,4); setItem(3,'junk',1,0); GB.Refresh()
 assert(named.WaterysSatchelSlot1.attrs.m_use==1 and named.WaterysSatchelSlot1.attrs.m_split==1 and not named.WaterysSatchelSlot1.attrs.m_equip)
 assert(named.WaterysSatchelSlot2.attrs.m_equip==1 and not named.WaterysSatchelSlot2.attrs.m_use and not named.WaterysSatchelSlot2.attrs.m_split)
@@ -346,8 +349,18 @@ im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macro
 -- Bind: item on cursor
 nav.attrs.focus=1; padclick('PAD1'); im.attrs.sel=3
 im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
-local sayLog={}; local oldprint=print; print=function(...) sayLog[#sayLog+1]=table.concat({...},' ') end
-padclick('PAD1'); print=oldprint; assert(not im.visible and nav.bindings.PAD1 and sayLog[1] and sayLog[1]:find('/satchel probe'),'bind message')
+do local bound; local hide
+  GamepadActionBarEditFrame={BindItem=function(self,id) bound=id end,HookScript=function(self,ev,fn) if ev=='OnHide' then hide=fn end end}
+  GamepadMode={FrameControlsManager={UnsuspendAllFrames=function() bound='unsuspended' end}}
+  padclick('PAD1')
+  assert(not im.visible and bound==101,'stock BindItem called with itemID')
+  assert(not nav.bindings.PAD1,'our pad bindings dropped while the stock bind dialog is open')
+  assert(hide,'OnHide hook installed'); assert(named.WaterysSatchelFrame.visible); hide(); assert(nav.bindings.PAD1,'pad bindings restored after dialog hides')
+  GamepadActionBarEditFrame=nil
+  local sayLog={}; local oldprint=print; print=function(...) sayLog[#sayLog+1]=table.concat({...},' ') end
+  GB.StartControllerBind({bag=0,slot=1}); print=oldprint; assert(sayLog[1] and sayLog[1]:find('/satchel probe'),'bind message when frame absent')
+end
+local oldprint=print
 -- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
 assert(named.WaterysSatchelQuick.attrs.useOnKeyDown==false and eqb.attrs.useOnKeyDown==false and named.WaterysSatchelMenu_item_use.attrs.useOnKeyDown==false)
 do local q=named.WaterysSatchelQuick; q.attrs.type=nil; q.attrs.macrotext='stale'; nav.attrs.focus=1

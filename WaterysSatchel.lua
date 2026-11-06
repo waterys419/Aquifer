@@ -116,18 +116,27 @@ local function inCombat() return InCombatLockdown() end
 
 -- Which entries the item menu offers for one item. Pure: takes the link and stack count.
 -- Use only if the item is usable, Equip only if it is equippable, Split only for stacks.
+-- This client has no global IsEquippableItem / GetItemSpell / IsUsableItem / GetItemInfoInstant /
+-- GetItemInfo (the stock UI only calls C_Item.*). Resolve at call time, C_Item first.
+local function itemAPI(name)
+    if C_Item and type(C_Item[name]) == "function" then return C_Item[name] end
+    local g = _G[name]
+    if type(g) == "function" then return g end
+end
+GB.itemAPI = itemAPI
 function GB.ItemMenuKeys(link, count)
     local k = { bind = true, link = true, destroy = true }
     if count and count > 1 then k.split = true end
     if link then
-        if IsEquippableItem and IsEquippableItem(link) then k.equip = true end
+        local eq, sp, inst, us = itemAPI("IsEquippableItem"), itemAPI("GetItemSpell"), itemAPI("GetItemInfoInstant"), itemAPI("IsUsableItem")
+        if eq and eq(link) then k.equip = true end
         local usable = false
-        if GetItemSpell and GetItemSpell(link) then usable = true end
-        if not usable and GetItemInfoInstant then
-            local _, _, _, _, _, classID = GetItemInfoInstant(link)
+        if sp and sp(link) then usable = true end
+        if not usable and inst then
+            local _, _, _, _, _, classID = inst(link)
             if classID == 0 then usable = true end   -- consumable
         end
-        if not usable and not k.equip and IsUsableItem and IsUsableItem(link) then usable = true end
+        if not usable and not k.equip and us and us(link) then usable = true end
         k.use = usable
     end
     return k
@@ -198,7 +207,8 @@ local function refreshSlot(b)
             b:SetBackdropBorderColor(r, g, bl, 1)
         else b:SetBackdropBorderColor(EMPTY_BORDER[1], EMPTY_BORDER[2], EMPTY_BORDER[3], 1) end
         if query ~= "" then
-            local name = link and GetItemInfo and GetItemInfo(link)
+            local gi = itemAPI("GetItemInfo")
+            local name = link and gi and gi(link)
             dim = not GB.Matches(name, query)
         end
         local start, dur, en = cooldown(b.bag, b.slot)
@@ -545,12 +555,39 @@ function GB.OpenChatWith(link)
     if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
     say2(link)
 end
--- Bind on a controller: use the stock gamepad binding flow (Blizzard_GamepadSharedUtility:
--- PromptedBindings / InputBindingStack). The client's UI source is packed, so the entry points are
--- probed at run time; /satchel probe lists what this client really has.
+-- Bind on a controller: the stock "Bind to Action Bar" dialog. Read from the client's own UI source:
+-- the stock bag, spellbook, character panel and objective tracker all call
+--   GamepadMode.FrameControlsManager:UnsuspendAllFrames(); GamepadActionBarEditFrame:BindItem(itemID)
+-- (Blizzard_GamepadActionBars/ActionBarEditFrame.lua). That dialog listens for the pad buttons itself,
+-- so our override bindings are dropped while it is open and put back when it hides.
+local bindHooked = false
+local function restoreAfterBind()
+    if inCombat() or not (frame and frame:IsShown()) then return end
+    SecureHandlerExecute(nav, "self:RunAttribute('rebind')")
+end
 function GB.StartControllerBind(b)
-    say2("Bind: send /satchel probe output to Claude")
-    return false
+    if C_AddOns and C_AddOns.LoadAddOn then pcall(C_AddOns.LoadAddOn, "Blizzard_GamepadActionBars")
+    elseif LoadAddOn then pcall(LoadAddOn, "Blizzard_GamepadActionBars") end
+    local ef = _G.GamepadActionBarEditFrame
+    if not (ef and ef.BindItem) then
+        say2("Bind: send /satchel probe output to Claude")
+        return false
+    end
+    local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag, b.slot)
+    local itemID = info and info.itemID
+    if not itemID then return false end
+    if not bindHooked and ef.HookScript then
+        bindHooked = true
+        ef:HookScript("OnHide", restoreAfterBind)
+    end
+    if not inCombat() then SecureHandlerExecute(nav, "self:ClearBindings()") end
+    local gm = _G.GamepadMode
+    if gm and gm.FrameControlsManager and gm.FrameControlsManager.UnsuspendAllFrames then
+        pcall(gm.FrameControlsManager.UnsuspendAllFrames, gm.FrameControlsManager)
+    end
+    local ok, err = pcall(ef.BindItem, ef, itemID)
+    if not ok then say2("Bind failed: " .. tostring(err)); restoreAfterBind(); return false end
+    return true
 end
 local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
 local function probeMatch(k)
@@ -584,7 +621,7 @@ function GB.Probe()
         line = line .. n .. " "
     end
     if line ~= "" then say2(line) end
-    local cv = GetCVar and GetCVar("GamePadEnable")
+    local cv = (C_CVar and C_CVar.GetCVar and C_CVar.GetCVar("GamePadEnable")) or (GetCVar and GetCVar("GamePadEnable"))
     add("GamePadEnable=" .. tostring(cv))
     if type(C_GamePad) == "table" then add("C_GamePad: " .. table.concat(methodsOf(C_GamePad), ", ")) else add("C_GamePad: absent") end
     local cb = _G.ContainerFrameCombinedBags
