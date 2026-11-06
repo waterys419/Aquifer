@@ -555,54 +555,68 @@ function GB.OpenChatWith(link)
     if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
     say2(link)
 end
--- Release only Satchel-owned input before calling the original stock method through
--- the client's native secure-call barrier. No addon closure or stock script replacement.
--- Observe closure from our own event frame, never from a hook inside the stock OnHide.
-local bindHandoff, bindFrame, bindWasOpen = false, nil, false
+-- Native binding handoff. Only the client's secure click action opens a stock
+-- bag button; the user then chooses Bind in Blizzard's own item menu. Never call
+-- BindItem/EnterBindingMode/FrameControlsManager from addon Lua, even via securecall.
+local DEFAULT_FRAMES = { "ContainerFrameCombinedBags" }
+for i = 1, 13 do DEFAULT_FRAMES[#DEFAULT_FRAMES + 1] = "ContainerFrame" .. i end
+local bindHandoff, bindWasOpen, bindSeenStock = false, false, false
+local function stockBindUIShown()
+    local edit = _G.GamepadActionBarEditFrame
+    if edit and edit.IsShown and edit:IsShown() then return true end
+    for _, name in ipairs(DEFAULT_FRAMES) do
+        local bag = _G[name]
+        if bag and bag:IsShown() then return true end
+    end
+    return false
+end
 local function restoreAfterBind()
-    if not bindHandoff or inCombat() then return end
-    if bindFrame and bindFrame:IsShown() then return end
+    if not bindHandoff then return end
+    if stockBindUIShown() then bindSeenStock = true; return end
+    if not bindSeenStock or inCombat() then return end
     local reopen = bindWasOpen
-    bindHandoff, bindFrame, bindWasOpen = false, nil, false
+    bindHandoff, bindWasOpen, bindSeenStock = false, false, false
     nav:SetAttribute("bindinghandoff", nil)
     if reopen and DB.enabled then GB.Open() end
 end
-function GB.PollControllerBind()
+function GB.PollControllerBind() restoreAfterBind() end
+function GB.CancelControllerBind()
+    if not bindHandoff then return end
+    if stockBindUIShown() then say2("Close Blizzard's bags and binding dialog first."); return end
+    bindSeenStock = true
     restoreAfterBind()
 end
-function GB.StartControllerBind(b)
-    if inCombat() or bindHandoff or not (frame and nav and b and b.bag and b.slot) then return false end
-    if C_AddOns and C_AddOns.LoadAddOn then pcall(C_AddOns.LoadAddOn, "Blizzard_GamepadActionBars")
-    elseif LoadAddOn then pcall(LoadAddOn, "Blizzard_GamepadActionBars") end
-    local ef = _G.GamepadActionBarEditFrame
-    if not (ef and ef.BindItem and ef.IsShown and securecallfunction) then
-        say2("Bind unavailable: send /satchel probe output after /reload.")
-        return false
+function GB.StartControllerBind(b, clickButton)
+    if inCombat() then return false end
+    if clickButton then
+        clickButton:SetAttribute("type", nil)
+        clickButton:SetAttribute("clickbutton", nil)
     end
-    if ef:IsShown() then return false end -- Do not replace another stock binding operation.
-    if issecurevariable and not issecurevariable(ef, "BindItem") then
-        say2("Bind needs a fresh /reload; the stock binding method is already tainted.")
-        return false
-    end
+    if bindHandoff or not (frame and nav and b and b.bag and b.slot) then return false end
+    if CursorHasItem and CursorHasItem() then say2("Clear the item from your cursor before binding."); return false end
     local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag, b.slot)
-    local itemID = info and info.itemID
-    if not itemID then return false end
+    if not (info and info.itemID) then return false end
+    local edit = _G.GamepadActionBarEditFrame
+    if edit and edit.IsShown and edit:IsShown() then return false end
+    local nativeBagShown = stockBindUIShown()
+    local bagButtonName = b.bag == 0 and "MainMenuBarBackpackButton" or ("CharacterBag" .. (b.bag - 1) .. "Slot")
+    local nativeBagButton = _G[bagButtonName]
     DB.bindBlocked = nil
-    bindHandoff, bindFrame, bindWasOpen = true, ef, frame:IsShown()
+    bindHandoff, bindWasOpen, bindSeenStock = true, frame:IsShown(), nativeBagShown
     nav:SetAttribute("bindinghandoff", 1)
-    -- Clear entire owner maps, not a guessed list of pad keys. This includes any
-    -- face/shoulder/chord overrides and both menus. Never clear UIParent's bindings.
     SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
     SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
     SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
     frame:Hide()
-    -- Pass Blizzard's original function directly, not an addon-defined wrapper.
-    -- Do not mutate GamepadMode, its binding stack, or the stock frame's fields.
-    local ok, err = pcall(securecallfunction, ef.BindItem, ef, itemID)
-    if not ok or not ef:IsShown() then
-        say2("Bind did not open. Type /reload and retry." .. (not ok and (" " .. tostring(err)) or ""))
-        restoreAfterBind()
-        return false
+    -- Attribute writes configure OUR secure action button. The engine calls the
+    -- untouched Blizzard bag button on this hardware click, after PreClick returns.
+    if clickButton and nativeBagButton and not nativeBagShown then
+        clickButton:SetAttribute("clickbutton", nativeBagButton)
+        clickButton:SetAttribute("type", "click")
+    end
+    say2("Blizzard bag: select " .. (info.hyperlink or ("item " .. info.itemID)) .. ", then More Actions > Bind to Action Bar. Close Blizzard's bags to return.")
+    if not (nativeBagShown or (clickButton and nativeBagButton)) then
+        say2("Press your normal Bags button first. /satchel bindcancel cancels this handoff.")
     end
     return true
 end
@@ -670,7 +684,7 @@ function GB.Probe()
 end
 -- Non-secure menu actions. They never touch protected frames.
 GB.MenuActions = {
-    -- Bind: item goes on the cursor so it can be dropped on an action bar button; key binding mode opens too.
+    -- Programmatic callers can prepare the handoff but never invoke stock binding code.
     bind = function(b)
         GB.StartControllerBind(b)
     end,
@@ -771,8 +785,9 @@ local function newMenu(kind, defs, parent)
     m.entries = {}
     for i, def in ipairs(defs) do
         local secureAction = (def.key == "use" or def.key == "equip")
+        local stockBind = def.key == "bind"
         local e = CreateFrame("Button", "WaterysSatchelMenu_" .. kind .. "_" .. def.key, m,
-            secureAction and "SecureActionButtonTemplate" or "SecureActionButtonTemplate,SecureHandlerClickTemplate")
+            (secureAction or stockBind) and "SecureActionButtonTemplate" or "SecureActionButtonTemplate,SecureHandlerClickTemplate")
         e:SetSize(140, 20)
         e:SetPoint("TOPLEFT", m, "TOPLEFT", 5, -5 - (i - 1) * 22)
         e:RegisterForClicks("AnyUp") -- up only: a bound key sends down + up
@@ -782,7 +797,13 @@ local function newMenu(kind, defs, parent)
         e.label:SetPoint("LEFT", 6, 0)
         e.label:SetText(def.label)
         e.def = def
-        if secureAction then
+        if stockBind then
+            e:SetAttribute("useOnKeyDown", false)
+            e:SetScript("PreClick", function(self, button, down)
+                if button ~= "LeftButton" or down or inCombat() then return end
+                GB.StartControllerBind(menuSlot(), self)
+            end)
+        elseif secureAction then
             e:SetAttribute("type", "macro")
             e:SetAttribute("useOnKeyDown", false)
             e:SetAttribute("macrotext", "")   -- snippet fills "/use <bag> <slot>" when the menu opens
@@ -792,6 +813,17 @@ local function newMenu(kind, defs, parent)
             e:SetAttribute("_onclick", MENU_CLOSE)
         end
         e:SetScript("PostClick", function()
+            if stockBind then
+                if not inCombat() then
+                    e:SetAttribute("type", nil)
+                    e:SetAttribute("clickbutton", nil)
+                end
+                GB.PollControllerBind()
+                if bindHandoff and not stockBindUIShown() then
+                    say2("If the Blizzard bag did not open, press your normal Bags button. /satchel bindcancel returns to Satchel.")
+                end
+                return
+            end
             if secureAction then
                 if not inCombat() then SecureHandlerExecute(m, MENU_SHUT) end   -- backup if the wrap did not run
                 return
@@ -1090,15 +1122,24 @@ function GB.ToggleSettings()
 end
 
 -- ---------- default bag replacement ----------
-local DEFAULT_FRAMES = { "ContainerFrameCombinedBags" }
-for i = 1, 13 do DEFAULT_FRAMES[#DEFAULT_FRAMES + 1] = "ContainerFrame" .. i end
 
+local HIDE_DEFAULT_BAGS = [[
+for i = 1, self:GetAttribute("defaultbagcount") or 0 do
+    local bag = self:GetFrameRef("defaultbag" .. i)
+    if bag and bag:IsShown() then bag:Hide(true) end
+end
+]]
 local function hideDefault()
-    if not DB or not DB.enabled or inCombat() then return end
+    if not DB or not DB.enabled or inCombat() or bindHandoff or not nav then return end
+    local count = 0
     for _, name in ipairs(DEFAULT_FRAMES) do
-        local f = _G[name]
-        if f and f:IsShown() then f:Hide() end
+        local bag = _G[name]
+        if bag then count = count + 1; SetRef(nav, "defaultbag" .. count, bag) end
     end
+    nav:SetAttribute("defaultbagcount", count)
+    -- RestrictedFrames.HANDLE:Hide uses Blizzard's native frame method. Do not
+    -- run stock bag OnHide/focus callbacks from an ordinary addon frame:Hide().
+    SecureHandlerExecute(nav, HIDE_DEFAULT_BAGS)
 end
 
 local function hookAll()
@@ -1117,7 +1158,7 @@ local function hookAll()
     for _, name in ipairs(DEFAULT_FRAMES) do
         local f = _G[name]
         if f and f.HookScript then f:HookScript("OnShow", function(self)
-            if DB.enabled and not inCombat() and not bindHandoff then self:Hide() end
+            hideDefault()
         end) end
     end
 end
@@ -1144,9 +1185,11 @@ local function say(m) print("|cff66ccffWaterys Satchel|r " .. m) end
 local function slash(msg)
     local cmd, arg = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = cmd:lower()
-    if cmd == "" or cmd == "help" then
+    if cmd == "bindcancel" then GB.CancelControllerBind()
+    elseif cmd == "" or cmd == "help" then
         say("/satchel toggle - open or close the bag (also /ws)")
         say("/satchel settings - settings window")
+        say("/satchel bindcancel - cancel a pending native-bag handoff (close stock bags first)")
         say("/satchel minimap on|off - minimap icon")
         say("/satchel search word - grey out other items")
         say("/satchel cols 8 - slots per row (4 to 20)")

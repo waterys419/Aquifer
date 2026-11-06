@@ -72,8 +72,14 @@ Author: Audrey
 
 ## Bind an item to a controller action bar
 
-Choose **Bind** in an item's menu outside combat. Satchel closes and releases its controller keys before the stock binding dialog opens. Hold the left/right action-bar modifiers to select the desired bar, then press the D-pad or face button. Blizzard's unmodified face slots may be reserved for Interact, Back and similar controls; those slots cannot be overwritten. Cancel or finish binding to return to Satchel. If combat starts, Satchel waits until combat ends before reopening.
+1. After updating, type `/reload` to clear the previous version's tainted session.
+2. Choose **Bind** in Satchel's item menu outside combat. Satchel closes, releases all its keys, and a secure click opens that item's normal Blizzard bag. If it does not open, press your normal Bags button.
+3. In the Blizzard bag, select the item again, then **More Actions → Bind to Action Bar**. Blizzard starts the binding dialog from its own controller input; Satchel does not call its binding or focus methods.
+4. Select the desired action bar with your normal left/right modifiers, then press the D-pad or a face button. The stock unmodified face slots for Interact/Back and similar controls remain reserved.
+5. Finish or cancel binding, then close the Blizzard bags. Satchel returns after all stock bag/binding windows are closed (and after combat if necessary).
 
-After updating, type `/reload` before testing. If a blocked-action warning appears, `/satchel probe` now includes the protected call reported by the game during binding. The addon never changes permanent controller bindings or Blizzard's reserved-slot rules.
+If the handoff is waiting but no Blizzard window opened, `/satchel bindcancel` returns to Satchel. It does not force-close Blizzard windows. `/satchel probe` records any protected call named by the game during the handoff.
 
-Offline checks: `lua5.1 tests/runtime.lua`; with the local Blizzard export available, `lua5.1 tests/stock-bind.lua` also exercises the stock dispatcher and placement utility. These checks cannot validate the native taint engine or physical controller input; an in-game reload and bind test is still required before release.
+Stock bag replacement now hides the normal bags through secure frame-handle operations, avoiding addon-driven focus callbacks. No Blizzard mixin methods, global functions or binding tables are replaced. Permanent controller bindings are unchanged.
+
+Offline checks: `lua5.1 tests/runtime.lua`; with Audrey's read-only UI export available, run `lua5.1 tests/stock-bind.lua` and `lua5.1 tests/stock-focus.lua`. They cover handoff, key release, trusted stock-button delegation, stock dispatcher routes and the callback chain reported by the probe. They do not emulate the native taint engine or physical controller input; the in-game steps above remain required before release.

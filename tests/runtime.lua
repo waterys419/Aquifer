@@ -285,10 +285,12 @@ local function click(btn,phase) if not btn.attrs._onclick then return end Secure
 -- secure action wrap (post body, owner = header) for macro entries, then PostClick.
 local macroLog={}
 local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelMenu_item.bindings[key] or named.WaterysSatchelMenu_bag.bindings[key])[1]
+    if t.scripts.PreClick then t.scripts.PreClick(t,'LeftButton',false) end
     combat=true; click(t,'up')
     if t.wraps and t.wraps.OnClick and t.wraps.OnClick.pre then SecureHandlerExecute(t,t.wraps.OnClick.pre,'LeftButton',false,t.wraps.OnClick.header) end
     if t.attrs.type=='macro' then macroLog[#macroLog+1]=t.attrs.macrotext
         local w=t.wraps and t.wraps.OnClick; if w and w.post then SecureHandlerExecute(t,w.post,'LeftButton',false,w.header) end end
+    if t.attrs.type=='click' then secure=true;t.attrs.clickbutton:Click('LeftButton');secure=false end
     combat=false
     if t.scripts.PostClick then t.scripts.PostClick(t,'LeftButton') end end
 -- client rules the mock models
@@ -346,74 +348,90 @@ nav.attrs.focus=2; padclick('PAD4')
 assert(im.visible and not bm.visible and visibleEntries()=='equip,bind,link,destroy',visibleEntries())
 local eqb=named.WaterysSatchelMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
 im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macroLog[1]=='/use 0 2' and not im.visible)
--- Bind handoff: all Satchel-owned maps released before the native call.
-nav.attrs.focus=1; padclick('PAD1')
-im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
+-- Bind handoff round 2: only a secure action delegates to the stock BAG button.
+-- All stock focus/bind methods must remain unreachable from addon Lua.
 do
-  local bound, nativeCall, calls = nil, false, 0
   local ownerFrame=named.WaterysSatchelFrame
+  local bindButton=named.WaterysSatchelMenu_item_bind
+  local opens, placements, iconRefreshes=0,0,0
   local stock={shown=false}
   function stock:IsShown() return self.shown end
-  function stock:BindItem(id)
-    assert(nativeCall,'BindItem must go through the native barrier, not pcall alone')
-    assert(not ownerFrame.visible and not im.visible and not bm.visible,'stock received input before bag/menu hide')
-    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'owner still captures input') end
-    bound=id;self.shown=true;calls=calls+1
-  end
-  stock.HookScript=function() error('must not hook the stock close path') end
+  stock.BindItem=function() error('addon must never call BindItem, even through securecall') end
+  stock.HookScript=function() error('must not hook stock bind scripts') end
   GamepadActionBarEditFrame=stock
-  GamepadMode={FrameControlsManager={UnsuspendAllFrames=function() error('must not mutate stock focus manager') end}}
-  securecallfunction=function(fn,...)
-    assert(fn==stock.BindItem,'pass stock method directly, not a closure')
-    nativeCall=true;fn(...);nativeCall=false
+  securecallfunction=function() error('securecall is not an insecure-to-secure bridge') end
+  GamepadMode={FrameControlsManager=setmetatable({}, {__index=function() error('addon touched stock focus manager') end})}
+  local function preferredTarget()
+    assert(secure,'ADDON_ACTION_FORBIDDEN / SetPreferredGamepadInteractTarget()')
+    iconRefreshes=iconRefreshes+1
   end
-  -- Include future/unknown chords: clearing the whole owner handles these too.
+  local oldHide=ContainerFrame1.scripts.OnHide
+  ContainerFrame1.scripts.OnHide=preferredTarget
+  -- Replacement must close stock bags through a secure frame operation, not addon :Hide().
+  ContainerFrame1:Show();assert(not ContainerFrame1.visible and iconRefreshes>0)
+  local native=frame('Button','MainMenuBarBackpackButton')
+  function native:Click()
+    assert(secure,'stock button was called from addon Lua')
+    assert(not ownerFrame.visible and not im.visible and not bm.visible)
+    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'still captures input') end
+    opens=opens+1;preferredTarget();OpenAllBags()
+  end
+  local otherBag=frame('Button','CharacterBag1Slot');otherBag.Click=native.Click
+  nav.attrs.focus=1;padclick('PAD1')
+  im.bindings.PAD1={bindButton,'LeftButton'}
   for _,owner in ipairs({nav,im,bm}) do
     owner.bindings.PADLSHOULDER={'old'};owner.bindings['PADLSHOULDER-PAD1']={'old'}
     owner.bindings['PADRSHOULDER-PAD4']={'old'}
   end
   padclick('PAD1')
-  assert(bound==101 and calls==1 and nav.attrs.bindinghandoff==1)
-  emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall')
-  assert(not WaterysSatchelDB.bindBlocked)
-  emit('ADDON_ACTION_BLOCKED','WaterysSatchel','PlaceAction')
-  assert(WaterysSatchelDB.bindBlocked.action=='PlaceAction','blocked-call diagnostic missing')
+  assert(opens==1 and ContainerFrame1.visible and not ownerFrame.visible and not stock.shown)
+  assert(bindButton.attrs.type==nil and bindButton.attrs.clickbutton==nil,'delegation leaked to next click')
   GB.Open();GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind');GB.PollControllerBind()
-  assert(not ownerFrame.visible and next(nav.bindings)==nil,'bag refresh reclaimed stock input')
-  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1),'duplicate bind')
-  -- Every raw face/d-pad/shoulder key and representative chord is free for stock.
+  assert(not ownerFrame.visible and next(nav.bindings)==nil)
   for _,key in ipairs({'PADDUP','PADDDOWN','PADDLEFT','PADDRIGHT','PAD1','PAD2','PAD3','PAD4',
     'PADLSHOULDER','PADRSHOULDER','PADLTRIGGER','PADRTRIGGER','PADLSHOULDER-PAD1','PADRSHOULDER-PAD4'}) do
     for _,owner in ipairs({nav,im,bm}) do assert(owner.bindings[key]==nil,key..' captured') end
   end
-  stock.shown=false;combat=true;GB.PollControllerBind()
-  assert(not ownerFrame.visible and nav.attrs.bindinghandoff==1,'restored in combat')
+  -- Next physical input belongs to Blizzard: native bag menu opens native binding.
+  secure=true;preferredTarget();stock.shown=true;secure=false
+  GB.PollControllerBind();assert(not ownerFrame.visible)
+  emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall');assert(not WaterysSatchelDB.bindBlocked)
+  emit('ADDON_ACTION_FORBIDDEN','WaterysSatchel','SetPreferredGamepadInteractTarget')
+  assert(WaterysSatchelDB.bindBlocked.action=='SetPreferredGamepadInteractTarget')
+  stock.shown=false;GB.PollControllerBind();assert(not ownerFrame.visible,'stock bags still open')
+  GB.CancelControllerBind();assert(not ownerFrame.visible,'cancel must not force-close stock bags')
+  secure=true;CloseAllBags();secure=false
+  combat=true;GB.PollControllerBind();assert(not ownerFrame.visible)
   combat=false;named.WaterysSatchelEvents.scripts.OnUpdate(nil,.2)
   assert(ownerFrame.visible and nav.bindings.PAD1 and not nav.attrs.bindinghandoff)
-  -- Native errors and swallowed/no-show errors restore our UI without raw fallbacks.
-  securecallfunction=function() error('simulated failure') end
-  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(ownerFrame.visible and nav.bindings.PAD1)
-  securecallfunction=function() end
-  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(ownerFrame.visible and nav.bindings.PAD1)
-  securecallfunction=nil
-  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(calls==1)
-  securecallfunction=function(fn,...) nativeCall=true;fn(...);nativeCall=false end
-  issecurevariable=function() return false end
-  assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));assert(calls==1)
-  issecurevariable=nil
-  combat=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));combat=false
+  -- Correct native bag button, not always the backpack.
+  items['2:1']={itemID=999,hyperlink='otherbag'}
+  assert(GB.StartControllerBind({bag=2,slot=1},bindButton))
+  assert(bindButton.attrs.clickbutton==otherBag)
+  secure=true;otherBag:Click();secure=false;bindButton.scripts.PostClick()
+  secure=true;CloseAllBags();secure=false;GB.PollControllerBind()
+  -- Missing native button: manual stock-bag key; do not immediately reclaim input.
+  MainMenuBarBackpackButton=nil
+  assert(GB.StartControllerBind(named.WaterysSatchelSlot1,bindButton))
+  assert(bindButton.attrs.type==nil)
+  GB.PollControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
+  GB.Slash('bindcancel');assert(ownerFrame.visible and nav.bindings.PAD1)
+  -- Programmatic handoff does not invoke any native method or alter the cursor.
+  assert(GB.StartControllerBind(named.WaterysSatchelSlot1));GB.PollControllerBind()
+  assert(not ownerFrame.visible)
+  secure=true;OpenAllBags();secure=false;GB.PollControllerBind()
+  GB.SetEnabled(false);secure=true;CloseAllBags();secure=false;GB.PollControllerBind()
+  assert(not ownerFrame.visible and next(nav.bindings)==nil)
+  GB.SetEnabled(true);GB.Open()
+  combat=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1,bindButton));combat=false
   stock.shown=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));stock.shown=false
   items['0:1'].itemID=nil;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));items['0:1'].itemID=101
-  assert(GB.StartControllerBind(named.WaterysSatchelSlot1));GB.SetEnabled(false)
-  stock.shown=false;GB.PollControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
-  GB.SetEnabled(true);GB.Open()
-  GamepadActionBarEditFrame=nil
-  local sayLog={};local savedPrint=print;print=function(...) sayLog[#sayLog+1]=table.concat({...},' ') end
-  GB.StartControllerBind({bag=0,slot=1});print=savedPrint
-  assert(sayLog[1] and sayLog[1]:find('/satchel probe'))
-  securecallfunction=nil;GamepadMode=nil
+  CursorHasItem=function() return true end;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));CursorHasItem=nil
+  assert(iconRefreshes>=4)
+  ContainerFrame1.scripts.OnHide=oldHide
+  GamepadActionBarEditFrame=nil;GamepadMode=nil;securecallfunction=nil
 end
-io.stdout:write('PASS: stock BindItem handoff, all owners/chords released, hidden bag, rebind guards, native barrier entry, polling restore and failure/combat paths\n')
+io.stdout:write('PASS: native stock-bag secure click, no addon BindItem/focus/securecall calls, secure stock visibility, all overrides released, stock-only bind session, failure/combat restoration and diagnostics\n')
 
 local oldprint=print
 -- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
