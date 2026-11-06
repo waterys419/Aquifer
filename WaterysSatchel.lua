@@ -3,10 +3,10 @@ local addonName = ...
 local GB = {}
 _G.WaterysSatchel = GB
 
-local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true }
+local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false }
 local MM_DEFAULT = { angle = 215, hide = false }
 local ICON = "Interface\\Icons\\INV_Misc_Bag_21"
-local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 32, 24
+local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 32, 46   -- BOTTOM = money row + controller hint row
 local MAXSLOT = 200
 
 -- ---------- pure layout helpers (tested offline) ----------
@@ -75,7 +75,7 @@ end
 -- ---------- state ----------
 local frame, nav, hl, moneyText, search, mmButton, settings
 local query = ""
-local freeText
+local freeText, footer
 local slots = {}
 local order, shownCount = {}, 0
 local pending = false
@@ -197,23 +197,43 @@ local function currentSizes()
     return sizes
 end
 
-local NAV_SETUP = [[
+-- Rebinds the pad for the current focus. Run by RunAttribute("rebind") on nav.
+-- PlayStation names: PAD1 = X (cross), PAD2 = Circle, PAD3 = Square, PAD4 = Triangle.
+local NAV_REBIND = [[
 local nav = self
-nav:SetAttribute("focus", 1)
-local b = nav:GetFrameRef("s1")
-local hl = nav:GetFrameRef("hl")
-if b and hl then hl:ClearAllPoints(); hl:SetPoint("CENTER", b, "CENTER"); hl:Show() end
 nav:ClearBindings()
 if nav:GetAttribute("padnav") == 1 then
   nav:SetBindingClick(true, "PADDUP", nav:GetFrameRef("up"), "LeftButton")
   nav:SetBindingClick(true, "PADDDOWN", nav:GetFrameRef("down"), "LeftButton")
   nav:SetBindingClick(true, "PADDLEFT", nav:GetFrameRef("left"), "LeftButton")
   nav:SetBindingClick(true, "PADDRIGHT", nav:GetFrameRef("right"), "LeftButton")
-  if b then
-    nav:SetBindingClick(true, "PAD1", b, "RightButton")
-    nav:SetBindingClick(true, "PAD3", b, "LeftButton")
-  end
+  nav:SetBindingClick(true, "PAD1", nav:GetFrameRef("itemopen"), "LeftButton")
+  nav:SetBindingClick(true, "PAD2", nav:GetFrameRef("closebag"), "LeftButton")
+  nav:SetBindingClick(true, "PAD3", nav:GetFrameRef("collapse"), "LeftButton")
+  nav:SetBindingClick(true, "PAD4", nav:GetFrameRef("bagopen"), "LeftButton")
 end
+]]
+local NAV_SETUP = [[
+local nav = self
+nav:SetAttribute("focus", 1)
+local b = nav:GetFrameRef("s1")
+local hl = nav:GetFrameRef("hl")
+if b and hl then hl:ClearAllPoints(); hl:SetPoint("CENTER", b, "CENTER"); hl:Show() end
+nav:RunAttribute("rebind")
+]]
+-- After a re-layout: keep focus inside the new slot count and put the yellow box back.
+local NAV_CLAMP = [[
+local nav = self
+local n = nav:GetAttribute("count") or 0
+local f = nav:GetAttribute("focus") or 1
+if f > n then f = n end
+if f < 1 then f = 1 end
+nav:SetAttribute("focus", f)
+local b = nav:GetFrameRef("s" .. f)
+local hl = nav:GetFrameRef("hl")
+if b and b:IsShown() and hl then hl:ClearAllPoints(); hl:SetPoint("CENTER", b, "CENTER"); hl:Show()
+elseif hl then hl:Hide() end
+nav:RunAttribute("rebind")
 ]]
 -- Run when a d-pad button is pressed. Moves focus using the stored neighbor table.
 local NAV_MOVE = [[
@@ -226,17 +246,87 @@ nav:SetAttribute("focus", t)
 local b = nav:GetFrameRef("s" .. t)
 local hl = nav:GetFrameRef("hl")
 if b and hl then hl:ClearAllPoints(); hl:SetPoint("CENTER", b, "CENTER"); hl:Show() end
-if b then
-  nav:SetBindingClick(true, "PAD1", b, "RightButton")
-  nav:SetBindingClick(true, "PAD3", b, "LeftButton")
-end
 ]]
-GB.NAV_SETUP, GB.NAV_MOVE = NAV_SETUP, NAV_MOVE
+-- Circle with no menu open: close the whole window.
+local CLOSE_BAG = [[
+if down then return end
+self:GetFrameRef("frame"):Hide()
+]]
+-- ---------- controller menus (stock style) ----------
+-- X on an item opens the item menu, Triangle opens the bag menu. D-pad up/down chooses,
+-- X confirms, Circle closes the menu. Use / Equip is a secure item button (works in combat).
+local ITEM_MENU = {
+  { key = "use",     label = "Use" },
+  { key = "bind",    label = "Bind" },
+  { key = "destroy", label = "Destroy" },
+  { key = "link",    label = "Share in Chat" },
+  { key = "split",   label = "Split" },
+}
+local BAG_MENU = {
+  { key = "cleanup", label = "Cleanup" },
+  { key = "junk",    label = "Sell Junk" },
+}
+GB.ITEM_MENU, GB.BAG_MENU = ITEM_MENU, BAG_MENU
+local MENU_OPEN = [[
+if down then return end
+local nav = self:GetFrameRef("nav")
+local m = self:GetFrameRef("menu")
+if m:GetAttribute("kind") == "item" then
+  local f = nav:GetAttribute("focus") or 1
+  local s = nav:GetFrameRef("s" .. f)
+  local item = s and s:GetAttribute("item2")
+  if not item then return end
+  m:SetAttribute("slotindex", f)
+  m:GetFrameRef("e1"):SetAttribute("item", item)
+  m:ClearAllPoints(); m:SetPoint("TOPLEFT", s, "TOPRIGHT", 4, 0)
+else
+  m:ClearAllPoints(); m:SetPoint("BOTTOMLEFT", nav:GetFrameRef("frame"), "BOTTOMLEFT", 8, 40)
+end
+m:SetAttribute("sel", 1)
+m:Show()
+nav:ClearBindings()
+m:ClearBindings()
+m:SetBindingClick(true, "PADDUP", m:GetFrameRef("up"), "LeftButton")
+m:SetBindingClick(true, "PADDDOWN", m:GetFrameRef("down"), "LeftButton")
+m:SetBindingClick(true, "PAD1", m:GetFrameRef("e1"), "LeftButton")
+m:SetBindingClick(true, "PAD2", m:GetFrameRef("closebtn"), "LeftButton")
+local h = m:GetFrameRef("mhl")
+local e = m:GetFrameRef("e1")
+h:ClearAllPoints(); h:SetPoint("TOPLEFT", e, "TOPLEFT", 0, 0); h:SetPoint("BOTTOMRIGHT", e, "BOTTOMRIGHT", 0, 0); h:Show()
+]]
+local MENU_MOVE = [[
+if down then return end
+local m = self:GetFrameRef("menu")
+local n = m:GetAttribute("count")
+local sel = m:GetAttribute("sel") or 1
+if self:GetAttribute("dir") == "up" then sel = sel - 1; if sel < 1 then sel = n end
+else sel = sel + 1; if sel > n then sel = 1 end end
+m:SetAttribute("sel", sel)
+local e = m:GetFrameRef("e" .. sel)
+local h = m:GetFrameRef("mhl")
+h:ClearAllPoints(); h:SetPoint("TOPLEFT", e, "TOPLEFT", 0, 0); h:SetPoint("BOTTOMRIGHT", e, "BOTTOMRIGHT", 0, 0)
+m:SetBindingClick(true, "PAD1", e, "LeftButton")
+]]
+-- Every entry (and the Circle close button) runs this first: close the menu, give the pad back to the grid.
+local MENU_CLOSE = [[
+if down then return end
+local m = self:GetFrameRef("menu")
+m:ClearBindings()
+m:Hide()
+m:GetFrameRef("nav"):RunAttribute("rebind")
+]]
+local MENU_HIDE_ALL = "self:ClearBindings(); self:Hide()"
+GB.NAV_SETUP, GB.NAV_MOVE, GB.NAV_REBIND = NAV_SETUP, NAV_MOVE, NAV_REBIND
 
 function GB.Layout()
     if inCombat() then pending = true; return end
     pending = false
     order = GB.BuildOrder(currentSizes())
+    if DB.collapsed then   -- collapsed: only slots that hold an item
+        local keep = {}
+        for _, o in ipairs(order) do if itemInfo(o[1], o[2]) then keep[#keep + 1] = o end end
+        order = keep
+    end
     local n = math.min(#order, MAXSLOT)
     local cols = math.max(1, math.min(DB.columns, 20))
     for i = 1, n do
@@ -258,7 +348,221 @@ function GB.Layout()
     nav:SetAttribute("count", n)
     nav:SetAttribute("padnav", DB.padNav and 1 or 0)
     GB.Refresh()
+    if frame:IsShown() and not (GB.itemMenu:IsShown() or GB.bagMenu:IsShown()) then SecureHandlerExecute(nav, NAV_CLAMP) end
 end
+
+
+-- ---------- controller button hints (footer) ----------
+-- The stock UI uses PlayStation art from its atlas. The atlas names are not readable from disk,
+-- so we try a few likely names at run time and fall back to plain text.
+local GLYPHS = {
+  cross    = { "Gamepad_Ltr_Cross_64", "Gamepad_Rev_Cross_64", "Gamepad_Gen_Cross_64", "Gamepad_Cross_64" },
+  circle   = { "Gamepad_Ltr_Circle_64", "Gamepad_Rev_Circle_64", "Gamepad_Gen_Circle_64", "Gamepad_Circle_64" },
+  square   = { "Gamepad_Ltr_Square_64", "Gamepad_Rev_Square_64", "Gamepad_Gen_Square_64", "Gamepad_Square_64" },
+  triangle = { "Gamepad_Ltr_Triangle_64", "Gamepad_Rev_Triangle_64", "Gamepad_Gen_Triangle_64", "Gamepad_Triangle_64" },
+}
+local GLYPH_TEXT = { cross = "X", circle = "O", square = "Sq", triangle = "Tri" }
+function GB.Glyph(name)
+    local ga = C_Texture and C_Texture.GetAtlasInfo
+    if ga then
+        for _, atlas in ipairs(GLYPHS[name]) do
+            if ga(atlas) then return "|A:" .. atlas .. ":18:18|a" end
+        end
+    end
+    return "|cffffd100[" .. GLYPH_TEXT[name] .. "]|r"
+end
+function GB.HintText(list)
+    local t = {}
+    for _, h in ipairs(list) do t[#t + 1] = GB.Glyph(h[1]) .. " |cffffd100" .. h[2] .. "|r" end
+    return table.concat(t, "   ")
+end
+function GB.GridHints()
+    return GB.HintText({ { "cross", "Select" }, { "square", (DB and DB.collapsed) and "Expand" or "Collapse" },
+        { "triangle", "Manage Bag" }, { "circle", "Close" } })
+end
+function GB.MenuHints() return GB.HintText({ { "cross", "Select" }, { "circle", "Close" } }) end
+
+local function menuSlot()
+    local m = GB.itemMenu
+    local i = m and m:GetAttribute("slotindex")
+    local b = i and slots[i]
+    if b and b.bag then return b end
+end
+local function say2(m) print("|cff66ccffWaterys Satchel|r " .. m) end
+local function itemLink(b)
+    local _, _, _, _, link = itemInfo(b.bag, b.slot)
+    return link
+end
+local function itemCount(b)
+    local _, count = itemInfo(b.bag, b.slot)
+    return count or 0
+end
+-- Non-secure menu actions. They never touch protected frames.
+GB.MenuActions = {
+    -- Bind: item goes on the cursor so it can be dropped on an action bar button; key binding mode opens too.
+    bind = function(b)
+        pickup(b.bag, b.slot)
+        say2("Item is on your cursor. Drop it on an action bar button, then bind a key to that button.")
+        local qk = _G.QuickKeybindFrame
+        if qk and _G.ShowUIPanel then pcall(_G.ShowUIPanel, qk) end
+    end,
+    -- Destroy: pick up, then the game's own delete confirmation (type DELETE for good items).
+    destroy = function(b)
+        local link = itemLink(b)
+        if not link then return end
+        pickup(b.bag, b.slot)
+        local _, _, quality = itemInfo(b.bag, b.slot)
+        local which = "DELETE_ITEM"
+        if quality and quality >= 3 and StaticPopupDialogs and StaticPopupDialogs.DELETE_GOOD_ITEM then which = "DELETE_GOOD_ITEM" end
+        if StaticPopup_Show then StaticPopup_Show(which, link)
+        else say2("Item is on your cursor. Drag it out of the window to delete it.") end
+    end,
+    link = function(b)
+        local link = itemLink(b)
+        if not link then return end
+        if ChatEdit_InsertLink then ChatEdit_InsertLink(link) else say2(link) end
+    end,
+    split = function(b)
+        local count = itemCount(b)
+        if count < 2 then return say2("This item is not a stack.") end
+        local ss = _G.StackSplitFrame
+        if ss and ss.OpenStackSplitFrame then
+            pcall(ss.OpenStackSplitFrame, ss, count, b, "BOTTOMRIGHT", "TOPRIGHT")
+            if ss.IsShown and ss:IsShown() then return end
+        end
+        local half = math.floor(count / 2)
+        if C_Container and C_Container.SplitContainerItem then C_Container.SplitContainerItem(b.bag, b.slot, half)
+        elseif SplitContainerItem then SplitContainerItem(b.bag, b.slot, half) end
+        say2("Split " .. half .. " onto your cursor. Open the item menu on an empty slot, press X to drop it.")
+    end,
+    cleanup = function()
+        if C_Container and C_Container.SortBags then C_Container.SortBags()
+        elseif SortBags then SortBags() end
+    end,
+    junk = function()
+        if not (MerchantFrame and MerchantFrame:IsShown()) then return say2("Open a vendor first.") end
+        if C_Container and C_Container.SellAllJunkItems then C_Container.SellAllJunkItems() end
+    end,
+}
+-- Square: show only filled slots / show everything again.
+function GB.ToggleCollapse()
+    if inCombat() then return say2("Not in combat.") end
+    DB.collapsed = not DB.collapsed
+    GB.Layout()
+    if frame and frame:IsShown() then SecureHandlerExecute(nav, NAV_SETUP) end
+    if footer then footer:SetText(GB.GridHints()) end
+end
+
+-- Called after X opens the item menu: if you hold an item on the cursor, drop it here instead of showing the menu.
+local function menuOpened()
+    local b = menuSlot()
+    if not b then return end
+    if CursorHasItem and CursorHasItem() or not itemInfo(b.bag, b.slot) then
+        if not inCombat() then
+            SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
+            SecureHandlerExecute(nav, "self:RunAttribute('rebind')")
+        end
+        if CursorHasItem and CursorHasItem() then pickup(b.bag, b.slot) end
+        return
+    end
+    local link = itemLink(b)
+    local eq = link and IsEquippableItem and IsEquippableItem(link)
+    local e = GB.itemMenu.entries
+    e[1].label:SetText(eq and "Equip" or "Use")
+    local stack = itemCount(b) > 1
+    e[5].label:SetTextColor(stack and 1 or 0.5, stack and 1 or 0.5, stack and 1 or 0.5)
+end
+GB.MenuOpened = menuOpened
+
+local function newMenu(kind, defs, parent)
+    local m = CreateFrame("Frame", "WaterysSatchelMenu_" .. kind, parent, "SecureHandlerBaseTemplate,BackdropTemplate")
+    m:SetFrameStrata("DIALOG")
+    m:SetClampedToScreen(true)
+    m:SetSize(150, #defs * 22 + 10)
+    m:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
+    m:SetBackdropColor(0.02, 0.09, 0.15, 0.98)
+    m:SetBackdropBorderColor(0.2, 0.6, 0.85, 1)
+    m:SetAttribute("count", #defs)
+    m:SetAttribute("sel", 1)
+    m:SetAttribute("kind", kind)
+    m:SetFrameRef("nav", nav)
+    m:Hide()
+    local mhl = CreateFrame("Frame", "WaterysSatchelMenuFocus_" .. kind, m, "BackdropTemplate")
+    mhl:SetFrameLevel(m:GetFrameLevel() + 20)
+    mhl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
+    mhl:SetBackdropBorderColor(1, 0.9, 0.2, 1)
+    mhl:Hide()
+    m:SetFrameRef("mhl", mhl)
+    m.hint = m:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    m.hint:SetPoint("TOPLEFT", m, "BOTTOMLEFT", 2, -4)
+    m.entries = {}
+    for i, def in ipairs(defs) do
+        local e = CreateFrame("Button", "WaterysSatchelMenu_" .. kind .. "_" .. def.key, m, "SecureActionButtonTemplate,SecureHandlerClickTemplate")
+        e:SetSize(140, 20)
+        e:SetPoint("TOPLEFT", m, "TOPLEFT", 5, -5 - (i - 1) * 22)
+        e:RegisterForClicks("AnyUp") -- up only: a bound key sends down + up
+        e:SetFrameRef("menu", m)
+        e:SetAttribute("_onclick", MENU_CLOSE)
+        e:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+        e.label = e:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        e.label:SetPoint("LEFT", 6, 0)
+        e.label:SetText(def.label)
+        e.def = def
+        if def.key == "use" then e:SetAttribute("type", "item") end
+        e:SetScript("PostClick", function()
+            local fn = GB.MenuActions[def.key]
+            if not fn then return end
+            if kind == "item" then
+                local b = menuSlot()
+                if b and (not inCombat() or def.key == "link") then fn(b) end
+            elseif not inCombat() then fn() end
+        end)
+        m:SetFrameRef("e" .. i, e)
+        m.entries[i] = e
+    end
+    for _, d in ipairs({ "up", "down" }) do
+        local btn = CreateFrame("Button", "WaterysSatchelMenuPad_" .. kind .. d, m, "SecureHandlerClickTemplate")
+        btn:SetAttribute("dir", d)
+        btn:SetFrameRef("menu", m)
+        btn:SetAttribute("_onclick", MENU_MOVE)
+        btn:RegisterForClicks("AnyUp")
+        m:SetFrameRef(d, btn)
+    end
+    local cb = CreateFrame("Button", "WaterysSatchelMenuClose_" .. kind, m, "SecureHandlerClickTemplate")
+    cb:SetFrameRef("menu", m)
+    cb:SetAttribute("_onclick", MENU_CLOSE)
+    cb:RegisterForClicks("AnyUp")
+    m:SetFrameRef("closebtn", cb)
+    local open = CreateFrame("Button", "WaterysSatchelMenuOpen_" .. kind, parent, "SecureHandlerClickTemplate")
+    open:SetFrameRef("nav", nav)
+    open:SetFrameRef("menu", m)
+    open:SetAttribute("_onclick", MENU_OPEN)
+    open:RegisterForClicks("AnyUp")
+    return m, open
+end
+
+local function buildMenu(parent)
+    nav:SetFrameRef("frame", parent)
+    local im, iopen = newMenu("item", ITEM_MENU, parent)
+    GB.itemMenu, GB.itemOpen = im, iopen
+    iopen:SetScript("PostClick", menuOpened)
+    nav:SetFrameRef("itemopen", iopen)
+    local bm, bopen = newMenu("bag", BAG_MENU, parent)
+    GB.bagMenu, GB.bagOpen = bm, bopen
+    nav:SetFrameRef("bagopen", bopen)
+    for _, m in ipairs({ im, bm }) do m.hint:SetText(GB.MenuHints()) end
+    local cl = CreateFrame("Button", "WaterysSatchelCloseBag", parent, "SecureHandlerClickTemplate")
+    cl:SetFrameRef("frame", parent)
+    cl:SetAttribute("_onclick", CLOSE_BAG)
+    cl:RegisterForClicks("AnyUp")
+    nav:SetFrameRef("closebag", cl)
+    local co = CreateFrame("Button", "WaterysSatchelCollapse", parent, "SecureHandlerClickTemplate")
+    co:RegisterForClicks("AnyUp")
+    co:SetScript("PostClick", function() GB.ToggleCollapse() end)
+    nav:SetFrameRef("collapse", co)
+    nav:SetAttribute("rebind", NAV_REBIND)
+end
+GB.MENU_OPEN, GB.MENU_MOVE, GB.MENU_CLOSE, GB.NAV_CLAMP, GB.CLOSE_BAG = MENU_OPEN, MENU_MOVE, MENU_CLOSE, NAV_CLAMP, CLOSE_BAG
 
 -- ---------- window ----------
 function GB.IsOpen() return frame and frame:IsShown() end
@@ -297,7 +601,9 @@ local function build()
     freeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     freeText:SetPoint("TOPRIGHT", -PAD, -10)
     moneyText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    moneyText:SetPoint("BOTTOMRIGHT", -PAD, 8)
+    moneyText:SetPoint("BOTTOMRIGHT", -PAD, 26)
+    footer = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    footer:SetPoint("BOTTOMLEFT", PAD, 8)
     -- Search box. Only reachable by mouse/cursor click: the d-pad grid never lands on it.
     search = CreateFrame("EditBox", "WaterysSatchelSearch", frame, "InputBoxTemplate")
     search:SetSize(110, 18)
@@ -322,6 +628,7 @@ local function build()
     hl:SetBackdropBorderColor(1, 0.9, 0.2, 1)
     hl:Hide()
     nav:SetFrameRef("hl", hl)
+    buildMenu(frame)
     for _, d in ipairs({ "up", "down", "left", "right" }) do
         local btn = CreateFrame("Button", "WaterysSatchelPad" .. d, frame, "SecureHandlerClickTemplate")
         btn:SetAttribute("dir", d)
@@ -332,10 +639,14 @@ local function build()
         btn:RegisterForClicks("AnyUp")
         nav:SetFrameRef(d, btn)
     end
-    frame:SetScript("OnShow", function() GB.Refresh() end)
+    frame:SetScript("OnShow", function() footer:SetText(GB.GridHints()); GB.Refresh() end)
     frame:SetScript("OnHide", function()
         if search then search:ClearFocus() end
-        if not inCombat() then SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()") end
+        if not inCombat() then
+            SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
+            SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
+            SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
+        end
     end)
 end
 
@@ -518,6 +829,7 @@ local function slash(msg)
         say("/satchel pad on|off - controller d-pad moves in the grid")
         say("/satchel scale 1 - window size (0.5 to 2)")
         say("/satchel reset - put the window back")
+        say("Controller (PlayStation): X = item menu / select, Square = collapse, Triangle = manage bag, Circle = close, d-pad = move.")
         say("/satchel config - show settings")
         say("Alt + drag moves the window.")
     elseif cmd == "toggle" then GB.Toggle()
@@ -597,7 +909,7 @@ ev:SetScript("OnEvent", function(_, e, a1)
             -- bag sizes can change when a bag is swapped
             local n = 0
             for _, s in ipairs(GB.BuildOrder(currentSizes())) do n = n + 1 end
-            if n ~= shownCount then GB.Layout() else GB.Refresh() end
+            if n ~= shownCount or DB.collapsed then GB.Layout() else GB.Refresh() end
         else GB.Refresh() end
     end
 end)

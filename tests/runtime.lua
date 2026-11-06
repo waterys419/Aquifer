@@ -48,7 +48,7 @@ function M:StopMovingOrSizing() self.moving=false end
 function M:ClearBindings() self.bindings={} end
 function M:ClearBinding(k) self.bindings[k]=nil end
 function M:SetBindingClick(p,key,target,button) self.bindings[key]={target,button} end
-for _,k in ipairs({'SetFrameStrata','SetClampedToScreen','SetMovable','EnableMouse','RegisterForDrag','SetBackdrop','SetBackdropColor','SetScale','SetTexCoord','SetDesaturated','SetHighlightTexture','SetAllPoints','SetAutoFocus','SetMaxLetters','ClearFocus','SetVertexColor'}) do M[k]=function() end end
+for _,k in ipairs({'SetFrameStrata','SetClampedToScreen','SetMovable','EnableMouse','RegisterForDrag','SetBackdrop','SetBackdropColor','SetScale','SetTexCoord','SetDesaturated','SetHighlightTexture','SetAllPoints','SetAutoFocus','SetMaxLetters','ClearFocus','SetVertexColor','SetTextColor'}) do M[k]=function() end end
 CreateFrame=frame
 UIParent=frame('Frame','UIParent')
 UISpecialFrames={}; SlashCmdList={}
@@ -59,6 +59,8 @@ function InCombatLockdown() return combat end
 function SecureHandlerExecute(f,snip,button,down)
     local fn=assert(loadstring(snip));setfenv(fn,setmetatable({self=f,button=button,down=down},{__index=_G}));secure=true;local ok,err=pcall(fn);secure=false;assert(ok,err)
 end
+function M:RunAttribute(k) SecureHandlerExecute(self,self.attrs[k]) end
+function M:SetPoint2() end
 NUM_BAG_SLOTS=4
 Minimap=frame('Frame','Minimap')
 function GetCursorPosition() return 100,100 end
@@ -145,7 +147,7 @@ GB.Slash('cols 8')
 local nav=named.WaterysSatchelNav
 nav.refs.hl=named.WaterysSatchelFocus
 GB.Open(); assert(named.WaterysSatchelFrame.visible)
-assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelSlot1 and nav.bindings.PAD1[2]=='RightButton')
+assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelMenuOpen_item and nav.bindings.PAD4[1]==named.WaterysSatchelMenuOpen_bag and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag and nav.bindings.PAD3[1]==named.WaterysSatchelCollapse)
 -- Real key press: the binding clicks the pad button once on key DOWN and once on key UP,
 -- but only for the click types the button registered. Returns how many times the move ran.
 local KEY={up='PADDUP',down='PADDDOWN',left='PADDLEFT',right='PADDRIGHT'}
@@ -168,12 +170,11 @@ for _,d in ipairs({'up','down','left','right'}) do local c=named['WaterysSatchel
 -- even if a down click ever reaches the snippet, it must not move
 nav.attrs.focus=5; SecureHandlerExecute(named.WaterysSatchelPadright,named.WaterysSatchelPadright.attrs._onclick,'LeftButton',true); assert(nav.attrs.focus==5)
 nav.attrs.focus=1
-press('right'); assert(nav.attrs.focus==2 and nav.bindings.PAD1[1]==named.WaterysSatchelSlot2)
+press('right'); assert(nav.attrs.focus==2)
 press('down'); assert(nav.attrs.focus==10)
 nav.attrs.focus=8; press('right'); assert(nav.attrs.focus==9,'row end wraps to next row')
 nav.attrs.focus=9; press('left'); assert(nav.attrs.focus==8)
 nav.attrs.focus=1; press('up'); assert(nav.attrs.focus==25)
-assert(nav.bindings.PAD3[2]=='LeftButton')
 -- pad nav off removes d-pad bindings
 GB.Slash('pad off'); assert(nav.attrs.padnav==0 and not nav.bindings.PADDUP and not nav.bindings.PAD1)
 GB.Slash('pad on'); assert(nav.bindings.PADDUP)
@@ -259,4 +260,49 @@ WaterysSatchelDB=nil; TidepoolDB={columns=10,scale=1.2}
 emit('ADDON_LOADED','WaterysSatchel'); assert(WaterysSatchelDB.columns==10 and WaterysSatchelDB.scale==1.2 and WaterysSatchelDB.minimap.angle==215 and WaterysSatchelDB.padNav==true)
 WaterysSatchelDB.columns=8
 
+
+-- 11. controller menus (stock style): X item menu, Triangle bag menu, Circle closes menu then bag
+local function click(btn,phase) if not btn.attrs._onclick then return end SecureHandlerExecute(btn,btn.attrs._onclick,'LeftButton',phase=='down') end
+local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelMenu_item.bindings[key] or named.WaterysSatchelMenu_bag.bindings[key])[1]; combat=true; click(t,'up'); combat=false; if t.scripts.PostClick then t.scripts.PostClick(t,'LeftButton') end end
+items['0:2']=nil
+items['0:1']={iconFileID=1,stackCount=5,quality=4,hyperlink='|cff|Hitem:1|h[Water Flask]|h|r'}
+GB.Open(); nav.attrs.focus=1
+local im=named.WaterysSatchelMenu_item; local bm=named.WaterysSatchelMenu_bag
+assert(#GB.ITEM_MENU==5 and GB.ITEM_MENU[2].label=='Bind' and GB.ITEM_MENU[3].label=='Destroy' and GB.ITEM_MENU[4].label=='Share in Chat' and GB.ITEM_MENU[5].label=='Split')
+assert(GB.BAG_MENU[1].label=='Cleanup' and GB.BAG_MENU[2].label=='Sell Junk')
+-- X opens item menu on the focused slot, in combat too
+nav.attrs.focus=1; padclick('PAD1'); assert(im.visible and not nav.bindings.PAD1)
+assert(named.WaterysSatchelMenu_item_use.attrs.item=='0 1' and named.WaterysSatchelMenu_item_use.attrs.type=='item')
+assert(im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_use and im.bindings.PAD2[1]==named.WaterysSatchelMenuClose_item)
+-- d-pad down chooses Bind, wraps at the ends
+local function menupad(m,d) local b=m.bindings[d=='up' and 'PADDUP' or 'PADDDOWN'][1]; combat=true; click(b,'up'); combat=false end
+menupad(im,'down'); assert(im.attrs.sel==2 and im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_bind)
+menupad(im,'up'); menupad(im,'up'); assert(im.attrs.sel==5)
+-- confirm Bind: menu closes, pad returns to grid, item goes on cursor
+im.attrs.sel=2; im.bindings.PAD1={named.WaterysSatchelMenu_item_bind,'LeftButton'}
+picked=nil; padclick('PAD1'); assert(not im.visible and nav.bindings.PAD1 and picked and picked[1]==0 and picked[2]==1)
+-- Destroy uses the game's confirm popup
+local shown; StaticPopup_Show=function(w,l) shown={w,l} end; StaticPopupDialogs={DELETE_ITEM={},DELETE_GOOD_ITEM={}}
+padclick('PAD1'); im.bindings.PAD1={named.WaterysSatchelMenu_item_destroy,'LeftButton'}; padclick('PAD1')
+assert(shown and shown[1]=='DELETE_GOOD_ITEM','epic needs typed confirm: '..tostring(shown and shown[1]))
+-- Circle closes the menu first
+padclick('PAD1'); assert(im.visible); padclick('PAD2'); assert(not im.visible and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag)
+-- Circle again closes the bag
+padclick('PAD2'); assert(not named.WaterysSatchelFrame.visible,'second Circle closes bag')
+-- Triangle bag menu: Cleanup sorts; Sell Junk needs a vendor
+GB.Open(); local sorted=false; C_Container.SortBags=function() sorted=true end
+padclick('PAD4'); assert(bm.visible); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_cleanup,'LeftButton'}; padclick('PAD1'); assert(sorted and not bm.visible)
+local sold=false; C_Container.SellAllJunkItems=function() sold=true end
+padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(not sold,'no vendor, no sale')
+MerchantFrame=frame('Frame','MerchantFrame'); MerchantFrame.visible=true
+padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(sold)
+MerchantFrame.visible=false
+-- Square collapses to filled slots and back
+assert(nav.attrs.count==28)
+padclick('PAD3'); assert(WaterysSatchelDB.collapsed and nav.attrs.count==1,'collapsed count '..tostring(nav.attrs.count))
+padclick('PAD3'); assert(not WaterysSatchelDB.collapsed and nav.attrs.count==28)
+-- hint footer text mentions all four
+local h=GB.GridHints(); assert(h:find('Select') and h:find('Collapse') and h:find('Manage Bag') and h:find('Close'))
+GB.Close()
+items['0:1']=nil
 io.stdout:write('PASS: one-press-one-slot, minimap, search, money, migration, grid order, neighbors, secure d-pad snippet, open/close/default swap, combat safety, Alt-drag\n')
