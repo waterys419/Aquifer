@@ -150,6 +150,14 @@ local function makeSlot(i)
     b.cd:SetAllPoints(b.icon)
     b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
     b.index = i
+    -- The stock StackSplitFrame calls owner:SplitStack(amount) on confirm (it crashed without this).
+    b.hasStackSplit = 0
+    b.SplitStack = function(self, n)
+        self.hasStackSplit = 0
+        if not (self.bag and n and n > 0) then return end
+        if C_Container and C_Container.SplitContainerItem then C_Container.SplitContainerItem(self.bag, self.slot, n)
+        elseif SplitContainerItem then SplitContainerItem(self.bag, self.slot, n) end
+    end
     -- Right click uses the item (secure, works in combat). Left click picks up / drops.
     b:SetAttribute("type2", "item")
     b:SetScript("PostClick", function(self, button)
@@ -240,7 +248,7 @@ if nav:GetAttribute("padnav") == 1 then
   nav:SetBindingClick(true, "PADDRIGHT", nav:GetFrameRef("right"), "LeftButton")
   nav:SetBindingClick(true, "PAD1", nav:GetFrameRef("itemopen"), "LeftButton")
   nav:SetBindingClick(true, "PAD2", nav:GetFrameRef("closebag"), "LeftButton")
-  nav:SetBindingClick(true, "PAD3", nav:GetFrameRef("collapse"), "LeftButton")
+  nav:SetBindingClick(true, "PAD3", nav:GetFrameRef("quick"), "LeftButton")
   nav:SetBindingClick(true, "PAD4", nav:GetFrameRef("triopen"), "LeftButton")
 end
 ]]
@@ -285,6 +293,16 @@ local CLOSE_BAG = [[
 if down then return end
 self:GetFrameRef("frame"):Hide()
 ]]
+local QUICK_PRE = [[
+local f = owner:GetAttribute("focus") or 1
+local s = owner:GetFrameRef("s" .. f)
+local item = s and s:GetAttribute("item2")
+if item and s:GetAttribute("hasitem") and (s:GetAttribute("m_equip") or s:GetAttribute("m_use")) then
+  self:SetAttribute("macrotext", "/use " .. item)
+else
+  self:SetAttribute("macrotext", "")
+end
+]]
 -- ---------- controller menus (stock style) ----------
 -- X or Triangle on an ITEM opens the item menu (only the entries that fit that item).
 -- Triangle on an EMPTY slot opens the bag menu. D-pad up/down chooses, X confirms, Circle closes.
@@ -300,6 +318,7 @@ local ITEM_MENU = {
 local BAG_MENU = {
   { key = "cleanup", label = "Cleanup" },
   { key = "junk",    label = "Sell Junk" },
+  { key = "hide",    label = "Hide empty slots" },
 }
 GB.ITEM_MENU, GB.BAG_MENU = ITEM_MENU, BAG_MENU
 -- Run by X (mode "x") and Triangle (mode "tri"). Item under focus -> item menu, built from the
@@ -467,21 +486,30 @@ function GB.HintText(list)
     return table.concat(t, "   ")
 end
 -- Footer depends on what the yellow box is on.
-function GB.GridHints(onItem)
-    local coll = (DB and DB.collapsed) and "Expand" or "Collapse"
+function GB.QuickLabel(link, count)
+    local k = GB.ItemMenuKeys(link, count)
+    if k.equip then return "Equip" elseif k.use then return "Use" end
+end
+function GB.GridHints(onItem, quick)
     if onItem then
-        return GB.HintText({ { { "cross", "triangle" }, "Item Menu" }, { "square", coll }, { "circle", "Close" } })
+        local l = { { { "cross", "triangle" }, "Item Menu" } }
+        if quick then l[#l + 1] = { "square", quick } end
+        l[#l + 1] = { "circle", "Close" }
+        return GB.HintText(l)
     end
-    return GB.HintText({ { "cross", "Place" }, { "triangle", "Bag Menu" }, { "square", coll }, { "circle", "Close" } })
+    return GB.HintText({ { "cross", "Place" }, { "triangle", "Bag Menu" }, { "circle", "Close" } })
 end
 function GB.MenuHints() return GB.HintText({ { "cross", "Select" }, { "circle", "Close" } }) end
 -- Called often (cheap): re-draws the footer when the focus moves to an item / empty slot.
 function GB.UpdateFooter()
     if not (footer and frame and frame:IsShown() and nav) then return end
     local b = slots[nav:GetAttribute("focus") or 1]
-    local onItem = (b and b.bag and itemInfo(b.bag, b.slot)) and true or false
-    local key = (onItem and "i" or "e") .. tostring(DB.collapsed)
-    if footer.shownKey ~= key then footer.shownKey = key; footer:SetText(GB.GridHints(onItem)) end
+    local icon, count, _, _, link
+    if b and b.bag then icon, count, _, _, link = itemInfo(b.bag, b.slot) end
+    local onItem = icon and true or false
+    local quick = onItem and GB.QuickLabel(link, count) or nil
+    local key = (onItem and "i" or "e") .. tostring(quick)
+    if footer.shownKey ~= key then footer.shownKey = key; footer:SetText(GB.GridHints(onItem, quick)) end
 end
 
 local function menuSlot()
@@ -499,14 +527,80 @@ local function itemCount(b)
     local _, count = itemInfo(b.bag, b.slot)
     return count or 0
 end
+-- Opens the chat edit box with the link in it (works with no chat box open, on a controller).
+function GB.OpenChatWith(link)
+    if ChatFrame_OpenChat then
+        local ok = pcall(ChatFrame_OpenChat, link, _G.DEFAULT_CHAT_FRAME)
+        if ok then return true end
+    end
+    local cf = _G.DEFAULT_CHAT_FRAME
+    local eb = (cf and cf.editBox) or _G.ChatFrame1EditBox
+    if eb and ChatEdit_ActivateChat then
+        pcall(ChatEdit_ActivateChat, eb)
+        if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
+        if eb.Insert then eb:Insert(link); return true end
+    end
+    if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
+    say2(link)
+end
+-- Bind on a controller: use the stock gamepad binding flow (Blizzard_GamepadSharedUtility:
+-- PromptedBindings / InputBindingStack). The client's UI source is packed, so the entry points are
+-- probed at run time; /satchel bindprobe lists what this client really has.
+local BIND_CANDIDATES = {
+    "PromptedBinding_StartForItem", "GamepadBinding_StartForItem", "PromptedBindings_StartForItem",
+    "ContainerFrame_StartGamepadBinding", "ItemButton_StartGamepadBind",
+}
+function GB.StartControllerBind(b)
+    if C_AddOns and C_AddOns.LoadAddOn then pcall(C_AddOns.LoadAddOn, "Blizzard_GamepadSharedUtility")
+    elseif LoadAddOn then pcall(LoadAddOn, "Blizzard_GamepadSharedUtility") end
+    local link = itemLink(b)
+    local g = _G
+    -- 1) the stock item button's own handler, if it exists in this client
+    for _, n in ipairs(BIND_CANDIDATES) do
+        if type(g[n]) == "function" then
+            if pcall(g[n], b.bag, b.slot, link) then return true end
+        end
+    end
+    -- 2) PromptedBindings object with a method taking an item/action
+    for _, objName in ipairs({ "PromptedBindings", "PromptedBinding", "InputBindingStack" }) do
+        local o = g[objName]
+        if type(o) == "table" then
+            for _, m in ipairs({ "StartForItem", "BindItem", "PromptForItem", "StartBindingForItem" }) do
+                if type(o[m]) == "function" then
+                    if pcall(o[m], o, b.bag, b.slot, link) or pcall(o[m], o, link) then return true end
+                end
+            end
+        end
+    end
+    -- 3) fall back to the gamepad action-bar placement: item on cursor, no keyboard screen
+    pickup(b.bag, b.slot)
+    say2("Controller bind: the item is on your cursor. Drop it on a gamepad action-bar slot. (Run /satchel bindprobe and send Claude the output so the real prompt can be wired.)")
+    return false
+end
+function GB.BindProbe()
+    local found = {}
+    for k, v in pairs(_G) do
+        if type(k) == "string" and (k:find("Prompted") or k:find("InputBindingStack") or k:find("GamepadBind") or k:find("GamepadBinding")) then
+            found[#found + 1] = k .. "(" .. type(v) .. ")"
+        end
+    end
+    table.sort(found)
+    say2("bind probe: " .. (#found > 0 and table.concat(found, ", ") or "nothing found (try /reload with the gamepad addon loaded)"))
+    for _, k in ipairs(found) do
+        local n = k:match("^(.-)%(")
+        if type(_G[n]) == "table" then
+            local ms = {}
+            for mk, mv in pairs(_G[n]) do if type(mv) == "function" then ms[#ms + 1] = mk end end
+            table.sort(ms)
+            say2(n .. ": " .. table.concat(ms, ", "))
+        end
+    end
+end
 -- Non-secure menu actions. They never touch protected frames.
 GB.MenuActions = {
     -- Bind: item goes on the cursor so it can be dropped on an action bar button; key binding mode opens too.
     bind = function(b)
-        pickup(b.bag, b.slot)
-        say2("Item is on your cursor. Drop it on an action bar button, then bind a key to that button.")
-        local qk = _G.QuickKeybindFrame
-        if qk and _G.ShowUIPanel then pcall(_G.ShowUIPanel, qk) end
+        GB.StartControllerBind(b)
     end,
     -- Destroy: pick up, then the game's own delete confirmation (type DELETE for good items).
     destroy = function(b)
@@ -522,21 +616,28 @@ GB.MenuActions = {
     link = function(b)
         local link = itemLink(b)
         if not link then return end
-        if ChatEdit_InsertLink then ChatEdit_InsertLink(link) else say2(link) end
+        GB.OpenChatWith(link)
     end,
     split = function(b)
         local count = itemCount(b)
         if count < 2 then return say2("This item is not a stack.") end
+        -- same call the stock bag makes: StackSplitFrame:OpenStackSplitFrame(maxStack, owner, anchor, anchorTo)
         local ss = _G.StackSplitFrame
+        b.hasStackSplit = 1
         if ss and ss.OpenStackSplitFrame then
             pcall(ss.OpenStackSplitFrame, ss, count, b, "BOTTOMRIGHT", "TOPRIGHT")
             if ss.IsShown and ss:IsShown() then return end
+        elseif _G.OpenStackSplitFrame then
+            pcall(_G.OpenStackSplitFrame, count, b, "BOTTOMRIGHT", "TOPRIGHT")
+            if ss and ss.IsShown and ss:IsShown() then return end
         end
+        b.hasStackSplit = 0
         local half = math.floor(count / 2)
         if C_Container and C_Container.SplitContainerItem then C_Container.SplitContainerItem(b.bag, b.slot, half)
         elseif SplitContainerItem then SplitContainerItem(b.bag, b.slot, half) end
         say2("Split " .. half .. " onto your cursor. Press X on an empty slot to drop it.")
     end,
+    hide = function() GB.ToggleCollapse() end,
     cleanup = function()
         if C_Container and C_Container.SortBags then C_Container.SortBags()
         elseif SortBags then SortBags() end
@@ -546,15 +647,17 @@ GB.MenuActions = {
         if C_Container and C_Container.SellAllJunkItems then C_Container.SellAllJunkItems() end
     end,
 }
--- Square: show only filled slots / show everything again.
-function GB.ToggleCollapse()
+-- "Hide empty slots" (settings tick box + bag menu entry). DB.collapsed.
+function GB.SetCollapsed(on)
     if inCombat() then return say2("Not in combat.") end
-    DB.collapsed = not DB.collapsed
+    DB.collapsed = on and true or false
+    GB.UpdateMenuLabels()
     GB.Layout()
     if frame and frame:IsShown() then SecureHandlerExecute(nav, NAV_SETUP) end
     if footer then footer.shownKey = nil end
     GB.UpdateFooter()
 end
+function GB.ToggleCollapse() GB.SetCollapsed(not DB.collapsed) end
 
 -- Runs after X: with an item on the cursor, drop it on the focused slot (and close any menu that
 -- just opened). X on an empty slot does nothing else.
@@ -646,6 +749,14 @@ local function newMenu(kind, defs, parent)
     return m
 end
 
+function GB.UpdateMenuLabels()
+    local m = GB.bagMenu
+    if not (m and m.entries and DB) then return end
+    for _, e in ipairs(m.entries) do
+        if e.def.key == "hide" then e.label:SetText("Hide empty slots: " .. (DB.collapsed and "On" or "Off")) end
+    end
+end
+
 local function newOpener(name, mode, im, bm, parent)
     local o = CreateFrame("Button", name, parent, "SecureHandlerClickTemplate")
     o:SetAttribute("mode", mode)
@@ -670,15 +781,21 @@ local function buildMenu(parent)
     SetRef(nav, "itemopen", xo)
     SetRef(nav, "triopen", to)
     for _, m in ipairs({ im, bm }) do m.hint:SetText(GB.MenuHints()) end
+    GB.UpdateMenuLabels()
     local cl = CreateFrame("Button", "WaterysSatchelCloseBag", parent, "SecureHandlerClickTemplate")
     SetRef(cl, "frame", parent)
     cl:SetAttribute("_onclick", CLOSE_BAG)
     cl:RegisterForClicks("AnyUp")
     SetRef(nav, "closebag", cl)
-    local co = CreateFrame("Button", "WaterysSatchelCollapse", parent, "SecureHandlerClickTemplate")
-    co:RegisterForClicks("AnyUp")
-    co:SetScript("PostClick", function() GB.ToggleCollapse() end)
-    SetRef(nav, "collapse", co)
+    -- Square: quick action on the focused item (Equip if equippable, else Use if usable). A secure
+    -- macro button; the pre-body of the wrap fills "/use <bag> <slot>" from the focused slot.
+    local qa = CreateFrame("Button", "WaterysSatchelQuick", parent, "SecureActionButtonTemplate,SecureHandlerBaseTemplate")
+    qa:RegisterForClicks("AnyUp")
+    qa:SetAttribute("type", "macro")
+    qa:SetAttribute("macrotext", "")
+    SecureHandlerWrapScript(qa, "OnClick", nav, QUICK_PRE)
+    GB.quickBtn = qa
+    SetRef(nav, "quick", qa)
     nav:SetAttribute("rebind", NAV_REBIND)
 end
 GB.MENU_OPEN, GB.MENU_MOVE, GB.MENU_CLOSE, GB.MENU_SHUT, GB.NAV_CLAMP, GB.CLOSE_BAG = MENU_OPEN, MENU_MOVE, MENU_CLOSE, MENU_SHUT, NAV_CLAMP, CLOSE_BAG
@@ -851,7 +968,7 @@ function GB.SetMinimapHidden(h) DB.minimap.hide = h and true or false; GB.PlaceM
 local function buildSettings()
     local f = CreateFrame("Frame", "WaterysSatchelSettings", UIParent, "BackdropTemplate")
     settings = f
-    f:SetSize(220, 190); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
+    f:SetSize(240, 216); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
     f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
     f:SetBackdropColor(0.02, 0.09, 0.15, 0.96); f:SetBackdropBorderColor(0.2, 0.6, 0.85, 1)
     f:EnableMouse(true); f:SetMovable(true); f:RegisterForDrag("LeftButton")
@@ -874,13 +991,14 @@ local function buildSettings()
         check("WaterysSatchelCheckMinimap", -34, "Hide minimap icon", function() return DB.minimap.hide end, GB.SetMinimapHidden),
         check("WaterysSatchelCheckPad", -60, "Controller d-pad in bag", function() return DB.padNav end, function(v) GB.SetPad(v) end),
         check("WaterysSatchelCheckBag", -86, "Use Waterys Satchel instead of normal bag", function() return DB.enabled end, function(v) GB.SetEnabled(v) end),
+        check("WaterysSatchelCheckHide", -112, "Hide empty slots", function() return DB.collapsed end, function(v) GB.SetCollapsed(v) end),
     }
     local cl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    cl:SetPoint("TOPLEFT", 14, -126)
+    cl:SetPoint("TOPLEFT", 14, -152)
     f.colText = cl
     local function colBtn(name, x, txt, d)
         local b = CreateFrame("Button", name, f, "UIPanelButtonTemplate")
-        b:SetSize(26, 22); b:SetPoint("TOPLEFT", x, -148); b:SetText(txt)
+        b:SetSize(26, 22); b:SetPoint("TOPLEFT", x, -174); b:SetText(txt)
         b:SetScript("OnClick", function() GB.SetCols(DB.columns + d); f.refresh() end)
     end
     colBtn("WaterysSatchelColMinus", 14, "-", -1); colBtn("WaterysSatchelColPlus", 44, "+", 1)
@@ -962,8 +1080,10 @@ local function slash(msg)
         say("/satchel pad on|off - controller d-pad moves in the grid")
         say("/satchel scale 1 - window size (0.5 to 2)")
         say("/satchel reset - put the window back")
-        say("Controller (PlayStation): X or Triangle on an item = item menu (Use, Equip, Bind, Split, Share, Destroy); Triangle on an empty slot = bag menu (Cleanup, Sell Junk); Square = collapse; Circle = close; d-pad = move.")
+        say("Controller (PlayStation): X or Triangle on an item = item menu (Use, Equip, Bind, Split, Share, Destroy); Triangle on an empty slot = bag menu (Cleanup, Sell Junk, Hide empty slots); Square = quick Equip/Use; Circle = close; d-pad = move.")
         say("/satchel glyphs - show which button pictures were found; /satchel glyph cross AtlasName sets one")
+        say("/satchel hide on|off - hide empty slots (also a tick box in settings and an entry in the Triangle bag menu)")
+        say("/satchel bindprobe - list the client's controller-binding functions")
         say("/satchel config - show settings")
         say("Alt + drag moves the window.")
     elseif cmd == "toggle" then GB.Toggle()
@@ -1000,6 +1120,10 @@ local function slash(msg)
         DB.point = nil; frame:ClearAllPoints()
         frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -80, 120)
         say("Window put back.")
+    elseif cmd == "bindprobe" then
+        GB.BindProbe()
+    elseif cmd == "hide" then
+        GB.SetCollapsed(arg == "on" or (arg ~= "off" and not DB.collapsed)); say("Hide empty slots: " .. (DB.collapsed and "ON" or "OFF"))
     elseif cmd == "glyphs" then
         for _, l in ipairs(GB.GlyphReport()) do say(l) end
     elseif cmd == "glyph" then

@@ -17,7 +17,7 @@ One combined bag, shown as a plain grid, for **WoW: Forever** (client folder `_f
 
 ## Controller d-pad
 
-While the bag is open, the d-pad moves a yellow frame from slot to slot, exactly one slot per press, in the direction you press. X or Triangle on an item opens its menu (Use, Equip, Bind, Split, Share in Chat, Destroy - only what fits the item). Triangle on an empty slot opens the bag menu (Cleanup, Sell Junk). Square collapses empty slots, Circle closes the menu, then the bag. Turn this off with `/satchel pad off` or the **Controller d-pad in bag** checkbox.
+While the bag is open, the d-pad moves a yellow frame from slot to slot, exactly one slot per press, in the direction you press. X or Triangle on an item opens its menu (Use, Equip, Bind, Split, Share in Chat, Destroy - only what fits the item). Triangle on an empty slot opens the bag menu (Cleanup, Sell Junk). Square is the quick action on the selected item: Equip if it is gear, otherwise Use if it can be used (the footer shows which). Circle closes the menu, then the bag. Hide empty slots is a tick box in settings, and an entry in the Triangle bag menu. Turn this off with `/satchel pad off` or the **Controller d-pad in bag** checkbox.
 
 ## Minimap button
 
@@ -45,6 +45,8 @@ Every command works with `/satchel` or the short `/ws`.
 | `/satchel search word` | Grey out every item that doesn't match |
 | `/satchel cols 8` | Slots per row (4 to 20, default 8) |
 | `/satchel scale 1` | Window size (0.5 to 2, default 1) |
+| `/satchel hide on` / `off` | Hide empty slots |
+| `/satchel bindprobe` | List the client's controller-binding functions |
 | `/satchel pad on` / `off` | Turn controller d-pad movement on or off |
 | `/satchel default on` / `off` | `on` brings the normal bags back; `off` uses the Satchel |
 | `/satchel reset` | Put the window back at its starting spot |
@@ -58,6 +60,7 @@ Open it with `/satchel settings` or right-click the minimap button.
 
 - **Hide minimap icon**
 - **Controller d-pad in bag**
+- **Hide empty slots**
 - **Use Waterys Satchel instead of normal bag**
 - **Columns** buttons to change slots per row.
 

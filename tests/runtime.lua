@@ -165,7 +165,7 @@ GB.Slash('cols 8')
 local nav=named.WaterysSatchelNav
 nav.refs.hl=named.WaterysSatchelFocus
 GB.Open(); assert(named.WaterysSatchelFrame.visible)
-assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelMenuOpen_x and nav.bindings.PAD4[1]==named.WaterysSatchelMenuOpen_tri and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag and nav.bindings.PAD3[1]==named.WaterysSatchelCollapse)
+assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelMenuOpen_x and nav.bindings.PAD4[1]==named.WaterysSatchelMenuOpen_tri and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag and nav.bindings.PAD3[1]==named.WaterysSatchelQuick)
 -- Real key press: the binding clicks the pad button once on key DOWN and once on key UP,
 -- but only for the click types the button registered. Returns how many times the move ran.
 local KEY={up='PADDUP',down='PADDDOWN',left='PADDLEFT',right='PADDRIGHT'}
@@ -286,6 +286,7 @@ local function click(btn,phase) if not btn.attrs._onclick then return end Secure
 local macroLog={}
 local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelMenu_item.bindings[key] or named.WaterysSatchelMenu_bag.bindings[key])[1]
     combat=true; click(t,'up')
+    if t.wraps and t.wraps.OnClick and t.wraps.OnClick.pre then SecureHandlerExecute(t,t.wraps.OnClick.pre,'LeftButton',false,t.wraps.OnClick.header) end
     if t.attrs.type=='macro' then macroLog[#macroLog+1]=t.attrs.macrotext
         local w=t.wraps and t.wraps.OnClick; if w and w.post then SecureHandlerExecute(t,w.post,'LeftButton',false,w.header) end end
     combat=false
@@ -373,16 +374,32 @@ padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButto
 MerchantFrame.visible=false
 -- the bag menu is also reachable from every empty slot, but an item slot never opens it
 nav.attrs.focus=1; padclick('PAD4'); assert(im.visible and not bm.visible); padclick('PAD2')
--- Square collapses to filled slots and back
-nav.attrs.focus=1
-padclick('PAD3'); assert(WaterysSatchelDB.collapsed and nav.attrs.count==3,'collapsed count '..tostring(nav.attrs.count))
-padclick('PAD3'); assert(not WaterysSatchelDB.collapsed and nav.attrs.count==28)
+-- Square = quick action: Equip/Use via secure macro; nothing on other items / empty slots
+macroLog={}; nav.attrs.focus=1; padclick('PAD3'); assert(macroLog[1]=='/use 0 1','quick use: '..tostring(macroLog[1]))
+macroLog={}; nav.attrs.focus=2; padclick('PAD3'); assert(macroLog[1]=='/use 0 2','quick equip')
+macroLog={}; nav.attrs.focus=5; padclick('PAD3'); assert(macroLog[1]=='','empty slot: no macro')
+assert(GB.QuickLabel('sword',1)=='Equip' and GB.QuickLabel('potion',1)=='Use')
+-- Hide empty slots: setting + bag menu entry
+GB.SetCollapsed(true); assert(WaterysSatchelDB.collapsed and nav.attrs.count==3,'collapsed count '..tostring(nav.attrs.count))
+GB.SetCollapsed(false); assert(not WaterysSatchelDB.collapsed and nav.attrs.count==28)
+assert(named.WaterysSatchelCheckHide, 'settings tick box')
+nav.attrs.focus=5; padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_hide,'LeftButton'}; padclick('PAD1')
+assert(WaterysSatchelDB.collapsed and nav.attrs.count==3,'bag menu toggle'); GB.ToggleCollapse(); assert(not WaterysSatchelDB.collapsed)
+-- SplitStack on every slot (StackSplitFrame calls owner:SplitStack(n))
+local sp; C_Container.SplitContainerItem=function(b,s,n) sp={b,s,n} end
+assert(type(named.WaterysSatchelSlot1.SplitStack)=='function'); named.WaterysSatchelSlot1:SplitStack(3); assert(sp[1]==0 and sp[2]==1 and sp[3]==3)
+-- Split opens the stock frame with (max, owner, anchor, anchorTo)
+local so; StackSplitFrame={OpenStackSplitFrame=function(self,mx,o,a,at) so={mx,o,a,at} end,IsShown=function() return true end}
+GB.MenuActions.split(named.WaterysSatchelSlot1); assert(so[1]==5 and so[2]==named.WaterysSatchelSlot1 and so[4]=='TOPRIGHT'); StackSplitFrame=nil
+-- Share opens chat with the link
+local opened; ChatFrame_OpenChat=function(t,cf) opened=t end
+GB.OpenChatWith('[x]'); assert(opened=='[x]'); ChatFrame_OpenChat=nil
 -- footer follows the focus: item -> Item Menu, empty -> Bag Menu
 local footer=nil
 nav.attrs.focus=1; GB.UpdateFooter(); local ft=named.WaterysSatchelFrame.scripts.OnShow and true
-local function footerText() for _,f in ipairs(frames) do if f.kind=='FontString' and f.text and f.text:find('Close') and f.text:find('Collapse') then return f.text end end end
+local function footerText() for _,f in ipairs(frames) do if f.kind=='FontString' and type(f.text)=='string' and f.text:find('Close') then return f.text end end end
 assert(footerText():find('Item Menu') and not footerText():find('Bag Menu'),'item footer: '..tostring(footerText()))
-nav.attrs.focus=5; GB.UpdateFooter(); assert(footerText():find('Bag Menu') and footerText():find('Place'),'empty footer: '..tostring(footerText()))
+assert(footerText():find('Use') or footerText():find('Equip'),'quick label'); nav.attrs.focus=5; GB.UpdateFooter(); assert(footerText():find('Bag Menu') and footerText():find('Place'),'empty footer: '..tostring(footerText()))
 -- glyphs: no atlas -> yellow text; with an atlas -> |A markup; manual override
 assert(GB.Glyph('cross'):find('%[X%]') and GB.Glyph('triangle'):find('Tri'))
 C_Texture={GetAtlasInfo=function(a) return a=='Gamepad_Ltr_Cross_64' and {} or nil end}; GB.ResetGlyphs()
