@@ -5,6 +5,8 @@ _G.WaterysSatchel = GB
 
 local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false }
 local MM_DEFAULT = { angle = 215, hide = false }
+-- Frame refs: the global SecureHandlerSetFrameRef works even when BackdropTemplate wipes the secure template's methods (WoW Forever crash at :SetFrameRef, Nov 6).
+local function SetRef(f, k, v) if SecureHandlerSetFrameRef then SecureHandlerSetFrameRef(f, k, v) else f:SetFrameRef(k, v) end end
 local ICON = "Interface\\Icons\\INV_Misc_Bag_21"
 local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 32, 46   -- BOTTOM = money row + controller hint row
 local MAXSLOT = 200
@@ -143,7 +145,7 @@ local function makeSlot(i)
     end)
     b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     slots[i] = b
-    nav:SetFrameRef("s" .. i, b)
+    SetRef(nav, "s" .. i, b)
     return b
 end
 
@@ -485,14 +487,14 @@ local function newMenu(kind, defs, parent)
     m:SetAttribute("count", #defs)
     m:SetAttribute("sel", 1)
     m:SetAttribute("kind", kind)
-    m:SetFrameRef("nav", nav)
+    SetRef(m, "nav", nav)
     m:Hide()
     local mhl = CreateFrame("Frame", "WaterysSatchelMenuFocus_" .. kind, m, "BackdropTemplate")
     mhl:SetFrameLevel(m:GetFrameLevel() + 20)
     mhl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
     mhl:SetBackdropBorderColor(1, 0.9, 0.2, 1)
     mhl:Hide()
-    m:SetFrameRef("mhl", mhl)
+    SetRef(m, "mhl", mhl)
     m.hint = m:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     m.hint:SetPoint("TOPLEFT", m, "BOTTOMLEFT", 2, -4)
     m.entries = {}
@@ -501,7 +503,7 @@ local function newMenu(kind, defs, parent)
         e:SetSize(140, 20)
         e:SetPoint("TOPLEFT", m, "TOPLEFT", 5, -5 - (i - 1) * 22)
         e:RegisterForClicks("AnyUp") -- up only: a bound key sends down + up
-        e:SetFrameRef("menu", m)
+        SetRef(e, "menu", m)
         e:SetAttribute("_onclick", MENU_CLOSE)
         e:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
         e.label = e:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -517,49 +519,49 @@ local function newMenu(kind, defs, parent)
                 if b and (not inCombat() or def.key == "link") then fn(b) end
             elseif not inCombat() then fn() end
         end)
-        m:SetFrameRef("e" .. i, e)
+        SetRef(m, "e" .. i, e)
         m.entries[i] = e
     end
     for _, d in ipairs({ "up", "down" }) do
         local btn = CreateFrame("Button", "WaterysSatchelMenuPad_" .. kind .. d, m, "SecureHandlerClickTemplate")
         btn:SetAttribute("dir", d)
-        btn:SetFrameRef("menu", m)
+        SetRef(btn, "menu", m)
         btn:SetAttribute("_onclick", MENU_MOVE)
         btn:RegisterForClicks("AnyUp")
-        m:SetFrameRef(d, btn)
+        SetRef(m, d, btn)
     end
     local cb = CreateFrame("Button", "WaterysSatchelMenuClose_" .. kind, m, "SecureHandlerClickTemplate")
-    cb:SetFrameRef("menu", m)
+    SetRef(cb, "menu", m)
     cb:SetAttribute("_onclick", MENU_CLOSE)
     cb:RegisterForClicks("AnyUp")
-    m:SetFrameRef("closebtn", cb)
+    SetRef(m, "closebtn", cb)
     local open = CreateFrame("Button", "WaterysSatchelMenuOpen_" .. kind, parent, "SecureHandlerClickTemplate")
-    open:SetFrameRef("nav", nav)
-    open:SetFrameRef("menu", m)
+    SetRef(open, "nav", nav)
+    SetRef(open, "menu", m)
     open:SetAttribute("_onclick", MENU_OPEN)
     open:RegisterForClicks("AnyUp")
     return m, open
 end
 
 local function buildMenu(parent)
-    nav:SetFrameRef("frame", parent)
+    SetRef(nav, "frame", parent)
     local im, iopen = newMenu("item", ITEM_MENU, parent)
     GB.itemMenu, GB.itemOpen = im, iopen
     iopen:SetScript("PostClick", menuOpened)
-    nav:SetFrameRef("itemopen", iopen)
+    SetRef(nav, "itemopen", iopen)
     local bm, bopen = newMenu("bag", BAG_MENU, parent)
     GB.bagMenu, GB.bagOpen = bm, bopen
-    nav:SetFrameRef("bagopen", bopen)
+    SetRef(nav, "bagopen", bopen)
     for _, m in ipairs({ im, bm }) do m.hint:SetText(GB.MenuHints()) end
     local cl = CreateFrame("Button", "WaterysSatchelCloseBag", parent, "SecureHandlerClickTemplate")
-    cl:SetFrameRef("frame", parent)
+    SetRef(cl, "frame", parent)
     cl:SetAttribute("_onclick", CLOSE_BAG)
     cl:RegisterForClicks("AnyUp")
-    nav:SetFrameRef("closebag", cl)
+    SetRef(nav, "closebag", cl)
     local co = CreateFrame("Button", "WaterysSatchelCollapse", parent, "SecureHandlerClickTemplate")
     co:RegisterForClicks("AnyUp")
     co:SetScript("PostClick", function() GB.ToggleCollapse() end)
-    nav:SetFrameRef("collapse", co)
+    SetRef(nav, "collapse", co)
     nav:SetAttribute("rebind", NAV_REBIND)
 end
 GB.MENU_OPEN, GB.MENU_MOVE, GB.MENU_CLOSE, GB.NAV_CLAMP, GB.CLOSE_BAG = MENU_OPEN, MENU_MOVE, MENU_CLOSE, NAV_CLAMP, CLOSE_BAG
@@ -627,17 +629,17 @@ local function build()
     hl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 3 })
     hl:SetBackdropBorderColor(1, 0.9, 0.2, 1)
     hl:Hide()
-    nav:SetFrameRef("hl", hl)
+    SetRef(nav, "hl", hl)
     buildMenu(frame)
     for _, d in ipairs({ "up", "down", "left", "right" }) do
         local btn = CreateFrame("Button", "WaterysSatchelPad" .. d, frame, "SecureHandlerClickTemplate")
         btn:SetAttribute("dir", d)
-        btn:SetFrameRef("nav", nav)
+        SetRef(btn, "nav", nav)
         btn:SetAttribute("_onclick", NAV_MOVE)
         -- ONE click event per press: a key bound with SetBindingClick sends a down click AND an
 -- up click. Registering for both ran the move twice (two slots per press). Up only.
         btn:RegisterForClicks("AnyUp")
-        nav:SetFrameRef(d, btn)
+        SetRef(nav, d, btn)
     end
     frame:SetScript("OnShow", function() footer:SetText(GB.GridHints()); GB.Refresh() end)
     frame:SetScript("OnHide", function()
