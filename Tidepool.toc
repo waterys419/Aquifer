@@ -1,8 +1,8 @@
 ## Interface: 16001
-## Title: Grid Bag
+## Title: Tidepool
 ## Notes: One plain grid bag. Controller d-pad moves to the slot you see next to you.
 ## Author: Audrey
-## Version: 1.0.0
-## SavedVariables: GridBagDB
+## Version: 2.0.0
+## SavedVariables: TidepoolDB, GridBagDB
 
-GridBag.lua
+Tidepool.lua
