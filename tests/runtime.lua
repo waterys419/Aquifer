@@ -1,5 +1,5 @@
--- Offline harness for Waterys Satchel. Run: lua5.1 tests/runtime.lua
-local source = arg[1] or 'WaterysSatchel.lua'
+-- Offline harness for Aquifer. Run: lua5.1 tests/runtime.lua
+local source = arg[1] or 'Aquifer.lua'
 local combat = false
 local secure = false
 local frames, named = {}, {}
@@ -107,23 +107,23 @@ local function emit(ev,...) for _,f in ipairs(frames) do if f.events[ev] then f.
 local msgs={}
 print=function(m) msgs[#msgs+1]=m end
 
-assert(loadfile(source))('WaterysSatchel')
-WaterysSatchelDB={columns=8}
-emit('ADDON_LOADED','WaterysSatchel')
+assert(loadfile(source))('Aquifer')
+AquiferDB={columns=8}
+emit('ADDON_LOADED','Aquifer')
 emit('PLAYER_LOGIN')
-local GB=WaterysSatchel
+local GB=Aquifer
 local N=GB.Neighbors
 
 -- 1. grid order: bag 0 slot 1 first, then bag 1, no skipping
 local o=GB.BuildOrder({[0]=2,3,n=2})
 assert(#o==5 and o[1][1]==0 and o[1][2]==1 and o[2][2]==2 and o[3][1]==1 and o[3][2]==1 and o[5][2]==3)
-assert(named.WaterysSatchelSlot1.bag==0 and named.WaterysSatchelSlot1.slot==1)
-assert(named.WaterysSatchelSlot16.bag==0 and named.WaterysSatchelSlot16.slot==16)
-assert(named.WaterysSatchelSlot17.bag==1 and named.WaterysSatchelSlot17.slot==1)
-assert(named.WaterysSatchelSlot28.bag==1 and named.WaterysSatchelSlot28.slot==12 and not named.WaterysSatchelSlot29)
-assert(named.WaterysSatchelSlot1.attrs.item2=='0 1' and named.WaterysSatchelSlot1.attrs.type2=='item')
+assert(named.AquiferSlot1.bag==0 and named.AquiferSlot1.slot==1)
+assert(named.AquiferSlot16.bag==0 and named.AquiferSlot16.slot==16)
+assert(named.AquiferSlot17.bag==1 and named.AquiferSlot17.slot==1)
+assert(named.AquiferSlot28.bag==1 and named.AquiferSlot28.slot==12 and not named.AquiferSlot29)
+assert(named.AquiferSlot1.attrs.item2=='0 1' and named.AquiferSlot1.attrs.type2=='item')
 -- visual positions: 8 columns, row by row
-local function xy(i) local p=named['WaterysSatchelSlot'..i].point; return p[4],p[5] end
+local function xy(i) local p=named['AquiferSlot'..i].point; return p[4],p[5] end
 local x1,y1=xy(1); local x8,y8=xy(8); local x9,y9=xy(9)
 assert(y1==y8 and x9==x1 and y9<y1 and x8>x1)
 
@@ -152,20 +152,20 @@ for _,cfg in ipairs({{16,4},{17,8},{30,8},{40,10},{3,1},{36,6}}) do
 end
 
 -- 3. attributes mirror neighbors for the secure snippet; bag size changes
-assert(named.WaterysSatchelNav.attrs.right8==9 and named.WaterysSatchelNav.attrs.down1==9 and named.WaterysSatchelNav.attrs.left1==28)
+assert(named.AquiferNav.attrs.right8==9 and named.AquiferNav.attrs.down1==9 and named.AquiferNav.attrs.left1==28)
 sizes[2]=6; GB.Layout()
-assert(named.WaterysSatchelSlot34 and named.WaterysSatchelSlot34.bag==2 and named.WaterysSatchelSlot34.slot==6)
-assert(named.WaterysSatchelNav.attrs.count==34)
+assert(named.AquiferSlot34 and named.AquiferSlot34.bag==2 and named.AquiferSlot34.slot==6)
+assert(named.AquiferNav.attrs.count==34)
 sizes[2]=0; GB.Layout()
-assert(not named.WaterysSatchelSlot29.visible and named.WaterysSatchelSlot29.bag==nil and named.WaterysSatchelNav.attrs.count==28)
-WaterysSatchelDB.columns=4; slashed=true; GB.Slash('cols 6'); assert(WaterysSatchelDB.columns==6 and named.WaterysSatchelNav.attrs.down1==7)
+assert(not named.AquiferSlot29.visible and named.AquiferSlot29.bag==nil and named.AquiferNav.attrs.count==28)
+AquiferDB.columns=4; slashed=true; GB.Slash('cols 6'); assert(AquiferDB.columns==6 and named.AquiferNav.attrs.down1==7)
 GB.Slash('cols 8')
 
 -- 4. secure snippet moves focus and rebinds A / X (d-pad logic, run in combat too)
-local nav=named.WaterysSatchelNav
-nav.refs.hl=named.WaterysSatchelFocus
-GB.Open(); assert(named.WaterysSatchelFrame.visible)
-assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.WaterysSatchelMenuOpen_x and nav.bindings.PAD4[1]==named.WaterysSatchelMenuOpen_tri and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag and nav.bindings.PAD3[1]==named.WaterysSatchelQuick)
+local nav=named.AquiferNav
+nav.refs.hl=named.AquiferFocus
+GB.Open(); assert(named.AquiferFrame.visible)
+assert(nav.attrs.focus==1 and nav.bindings.PADDUP and nav.bindings.PAD1[1]==named.AquiferMenuOpen_x and nav.bindings.PAD4[1]==named.AquiferMenuOpen_tri and nav.bindings.PAD2[1]==named.AquiferCloseBag and nav.bindings.PAD3[1]==named.AquiferQuick)
 -- Real key press: the binding clicks the pad button once on key DOWN and once on key UP,
 -- but only for the click types the button registered. Returns how many times the move ran.
 local KEY={up='PADDUP',down='PADDDOWN',left='PADDLEFT',right='PADDRIGHT'}
@@ -184,9 +184,9 @@ nav.attrs.focus=1; assert(press('right')==1); assert(nav.attrs.focus==2,'one pre
 nav.attrs.focus=10; assert(press('left')==1); assert(nav.attrs.focus==9,'one slot left')
 nav.attrs.focus=10; assert(press('down')==1); assert(nav.attrs.focus==18,'one row down')
 nav.attrs.focus=18; assert(press('up')==1); assert(nav.attrs.focus==10,'one row up')
-for _,d in ipairs({'up','down','left','right'}) do local c=named['WaterysSatchelPad'..d].clicks; assert(c.AnyUp and not c.AnyDown,d..' registers up only') end
+for _,d in ipairs({'up','down','left','right'}) do local c=named['AquiferPad'..d].clicks; assert(c.AnyUp and not c.AnyDown,d..' registers up only') end
 -- even if a down click ever reaches the snippet, it must not move
-nav.attrs.focus=5; SecureHandlerExecute(named.WaterysSatchelPadright,named.WaterysSatchelPadright.attrs._onclick,'LeftButton',true); assert(nav.attrs.focus==5)
+nav.attrs.focus=5; SecureHandlerExecute(named.AquiferPadright,named.AquiferPadright.attrs._onclick,'LeftButton',true); assert(nav.attrs.focus==5)
 nav.attrs.focus=1
 press('right'); assert(nav.attrs.focus==2)
 press('down'); assert(nav.attrs.focus==10)
@@ -198,85 +198,89 @@ GB.Slash('pad off'); assert(nav.attrs.padnav==0 and not nav.bindings.PADDUP and 
 GB.Slash('pad on'); assert(nav.bindings.PADDUP)
 
 -- 5. open/close via normal bag keys, replaces default bag
-GB.Close(); assert(not named.WaterysSatchelFrame.visible and next(nav.bindings)==nil)
-ToggleAllBags(); assert(named.WaterysSatchelFrame.visible and not ContainerFrame1.visible,'default must be hidden')
-ToggleAllBags(); assert(not named.WaterysSatchelFrame.visible)
-ToggleBackpack(); assert(named.WaterysSatchelFrame.visible)
-CloseAllBags(); assert(not named.WaterysSatchelFrame.visible)
-OpenAllBags(); assert(named.WaterysSatchelFrame.visible); CloseAllBags()
+GB.Close(); assert(not named.AquiferFrame.visible and next(nav.bindings)==nil)
+ToggleAllBags(); assert(named.AquiferFrame.visible and not ContainerFrame1.visible,'default must be hidden')
+ToggleAllBags(); assert(not named.AquiferFrame.visible)
+ToggleBackpack(); assert(named.AquiferFrame.visible)
+CloseAllBags(); assert(not named.AquiferFrame.visible)
+OpenAllBags(); assert(named.AquiferFrame.visible); CloseAllBags()
 ContainerFrame1:Show(); assert(not ContainerFrame1.visible,'default OnShow hidden')
 -- setting off -> default bag returns
-GB.Slash('default on'); assert(WaterysSatchelDB.enabled==false)
+GB.Slash('default on'); assert(AquiferDB.enabled==false)
 ContainerFrame1:Hide(); defaultShown=false
-ToggleAllBags(); assert(ContainerFrame1.visible and not named.WaterysSatchelFrame.visible)
-GB.Slash('default off'); assert(WaterysSatchelDB.enabled==true); ContainerFrame1:Hide()
+ToggleAllBags(); assert(ContainerFrame1.visible and not named.AquiferFrame.visible)
+GB.Slash('default off'); assert(AquiferDB.enabled==true); ContainerFrame1:Hide()
 
 -- 6. combat: normal bag opens; open window keeps working, no protected mutation
 combat=true; defaultShown=false
-ToggleAllBags(); assert(ContainerFrame1.visible and not named.WaterysSatchelFrame.visible)
+ToggleAllBags(); assert(ContainerFrame1.visible and not named.AquiferFrame.visible)
 combat=false; ContainerFrame1:Hide(); GB.Open()
 combat=true
 items['0:1']={iconFileID=1234,stackCount=5,quality=4}
 emit('BAG_UPDATE')
-assert(named.WaterysSatchelSlot1.icon.texture==1234 and named.WaterysSatchelSlot1.count.text==5)
-assert(named.WaterysSatchelSlot1.border[1]==.6 and named.WaterysSatchelSlot1.border[3]==.9,'quality border')
+assert(named.AquiferSlot1.icon.texture==1234 and named.AquiferSlot1.count.text==5)
+assert(named.AquiferSlot1.border[1]==.6 and named.AquiferSlot1.border[3]==.9,'quality border')
 items['0:1']=nil; emit('BAG_UPDATE')
-assert(named.WaterysSatchelSlot1.icon.texture==nil and named.WaterysSatchelSlot1.count.text=='')
-named.WaterysSatchelSlot1.scripts.PostClick(named.WaterysSatchelSlot1,'LeftButton'); assert(picked[2]==1)
-sizes[2]=2; emit('BAG_UPDATE'); assert(not named.WaterysSatchelSlot29.visible)
-GB.Slash('cols 5'); assert(WaterysSatchelDB.columns==5)
-combat=false; emit('PLAYER_REGEN_ENABLED'); assert(named.WaterysSatchelSlot29 and named.WaterysSatchelSlot29.visible and nav.attrs.count==30)
+assert(named.AquiferSlot1.icon.texture==nil and named.AquiferSlot1.count.text=='')
+named.AquiferSlot1.scripts.PostClick(named.AquiferSlot1,'LeftButton'); assert(picked[2]==1)
+sizes[2]=2; emit('BAG_UPDATE'); assert(not named.AquiferSlot29.visible)
+GB.Slash('cols 5'); assert(AquiferDB.columns==5)
+combat=false; emit('PLAYER_REGEN_ENABLED'); assert(named.AquiferSlot29 and named.AquiferSlot29.visible and nav.attrs.count==30)
 GB.Slash('cols 8'); sizes[2]=0; GB.Layout()
 
 -- 7. Alt+drag move, saved position
-local f=named.WaterysSatchelFrame
+local f=named.AquiferFrame
 alt=false; f.scripts.OnDragStart(f); assert(not f.moving)
 alt=true; f.scripts.OnDragStart(f); assert(f.moving)
-f.scripts.OnDragStop(f); assert(not f.moving and WaterysSatchelDB.point[1]=='BOTTOMRIGHT')
+f.scripts.OnDragStop(f); assert(not f.moving and AquiferDB.point[1]=='BOTTOMRIGHT')
 combat=true; f.moving=false; f.scripts.OnDragStart(f); assert(not f.moving); combat=false
 GB.Slash('help'); GB.Slash('config'); GB.Slash('bogus')
 assert(table.concat(msgs,'\n'):find('Unknown'))
-local seenEsc=false for _,n in ipairs(UISpecialFrames) do if n=='WaterysSatchelFrame' then seenEsc=true end end
+local seenEsc=false for _,n in ipairs(UISpecialFrames) do if n=='AquiferFrame' then seenEsc=true end end
 assert(seenEsc)
 
 
 -- 8. minimap button: placement, drag angle, click actions, hide setting
-local mm=named.WaterysSatchelMinimapButton; assert(mm and mm.parent==Minimap and TidepoolDB==nil or true)
+local mm=named.AquiferMinimapButton; assert(mm and mm.parent==Minimap and TidepoolDB==nil or true)
 local ox,oy=GB.MinimapOffset(0); assert(math.abs(ox-80)<1e-6 and math.abs(oy)<1e-6)
 ox,oy=GB.MinimapOffset(90); assert(math.abs(ox)<1e-6 and math.abs(oy-80)<1e-6)
 assert(math.abs(GB.AngleFromCursor(0,-5)-270)<1e-6 and math.abs(GB.AngleFromCursor(5,5)-45)<1e-6)
 assert(mm.visible and mm.point[1]=='CENTER' and mm.point[2]==Minimap)
-GB.Close(); mm.scripts.OnClick(mm,'LeftButton'); assert(named.WaterysSatchelFrame.visible,'left click opens')
-mm.scripts.OnClick(mm,'LeftButton'); assert(not named.WaterysSatchelFrame.visible,'left click closes')
-mm.scripts.OnClick(mm,'RightButton'); assert(named.WaterysSatchelSettings.visible,'right click opens settings')
-mm.scripts.OnClick(mm,'RightButton'); assert(not named.WaterysSatchelSettings.visible)
+GB.Close(); mm.scripts.OnClick(mm,'LeftButton'); assert(named.AquiferFrame.visible,'left click opens')
+mm.scripts.OnClick(mm,'LeftButton'); assert(not named.AquiferFrame.visible,'left click closes')
+mm.scripts.OnClick(mm,'RightButton'); assert(named.AquiferSettings.visible,'right click opens settings')
+mm.scripts.OnClick(mm,'RightButton'); assert(not named.AquiferSettings.visible)
 mm.scripts.OnDragStart(mm); assert(mm.scripts.OnUpdate); mm.scripts.OnUpdate(mm)
-assert(math.abs(WaterysSatchelDB.minimap.angle-45)<1e-6,'drag saves angle'); mm.scripts.OnDragStop(mm); assert(not mm.scripts.OnUpdate)
-GB.Slash('minimap off'); assert(WaterysSatchelDB.minimap.hide and not mm.visible)
-GB.Slash('minimap on'); assert(not WaterysSatchelDB.minimap.hide and mm.visible)
-named.WaterysSatchelSettings:Show(); named.WaterysSatchelCheckMinimap.checked=true; named.WaterysSatchelCheckMinimap.scripts.OnClick(named.WaterysSatchelCheckMinimap)
-assert(WaterysSatchelDB.minimap.hide and not mm.visible); GB.SetMinimapHidden(false)
-named.WaterysSatchelColPlus.scripts.OnClick(); assert(WaterysSatchelDB.columns==9); GB.SetCols(8); named.WaterysSatchelSettings:Hide()
+assert(math.abs(AquiferDB.minimap.angle-45)<1e-6,'drag saves angle'); mm.scripts.OnDragStop(mm); assert(not mm.scripts.OnUpdate)
+GB.Slash('minimap off'); assert(AquiferDB.minimap.hide and not mm.visible)
+GB.Slash('minimap on'); assert(not AquiferDB.minimap.hide and mm.visible)
+named.AquiferSettings:Show(); named.AquiferCheckMinimap.checked=true; named.AquiferCheckMinimap.scripts.OnClick(named.AquiferCheckMinimap)
+assert(AquiferDB.minimap.hide and not mm.visible); GB.SetMinimapHidden(false)
+named.AquiferColPlus.scripts.OnClick(); assert(AquiferDB.columns==9); GB.SetCols(8); named.AquiferSettings:Hide()
 
 -- 9. money, free slots, search, cooldown, theme
 assert(GB.MoneyText(123456):find('12g') and GB.MoneyText(123456):find('34s') and GB.MoneyText(123456):find('56c'))
 items['0:1']={iconFileID=1,stackCount=1,quality=1,hyperlink='|cff|Hitem:1|h[Water Flask]|h|r'}
 items['0:2']={iconFileID=2,stackCount=1,quality=1,hyperlink='|cff|Hitem:2|h[Iron Sword]|h|r'}
 GB.Open(); GB.Refresh()
-assert(named.WaterysSatchelFrame.children==nil)
+assert(named.AquiferFrame.children==nil)
 assert(GB.free==26,'free slots count '..tostring(GB.free))
-GB.SetQuery('water'); assert(named.WaterysSatchelSlot1.alpha==1 and named.WaterysSatchelSlot2.alpha<1,'search dims non-matches')
-GB.SetQuery(''); assert(named.WaterysSatchelSlot2.alpha==1)
+GB.SetQuery('water'); assert(named.AquiferSlot1.alpha==1 and named.AquiferSlot2.alpha<1,'search dims non-matches')
+GB.SetQuery(''); assert(named.AquiferSlot2.alpha==1)
 assert(GB.Matches('Water Flask','WAT') and not GB.Matches('Iron','wat') and GB.Matches(nil,''))
 C_Container.GetContainerItemCooldown=function(b,s) if s==1 then return 10,30,1 end return 0,0,1 end
-GB.Refresh(); assert(named.WaterysSatchelSlot1.cd.cooldown[2]==30 and named.WaterysSatchelSlot2.cd.cooldown[2]==0,'cooldown swirl')
+GB.Refresh(); assert(named.AquiferSlot1.cd.cooldown[2]==30 and named.AquiferSlot2.cd.cooldown[2]==0,'cooldown swirl')
 -- the d-pad never lands on the search box: nav only references slots
 for i=1,28 do assert(nav.attrs['right'..i]<=28) end
 GB.Close()
--- 10. migrate GridBag saved settings
-WaterysSatchelDB=nil; TidepoolDB={columns=10,scale=1.2}
-emit('ADDON_LOADED','WaterysSatchel'); assert(WaterysSatchelDB.columns==10 and WaterysSatchelDB.scale==1.2 and WaterysSatchelDB.minimap.angle==215 and WaterysSatchelDB.padNav==true)
-WaterysSatchelDB.columns=8
+-- 10. migrate saved settings: Waterys Satchel first, then Tidepool, then GridBag (only when the one before is empty)
+AquiferDB=nil; TidepoolDB={columns=10,scale=1.2}
+emit('ADDON_LOADED','Aquifer'); assert(AquiferDB.columns==10 and AquiferDB.scale==1.2 and AquiferDB.minimap.angle==215 and AquiferDB.padNav==true)
+AquiferDB=nil; TidepoolDB={columns=10}; WaterysSatchelDB={columns=7,scale=1.5}
+emit('ADDON_LOADED','Aquifer'); assert(AquiferDB.columns==7 and AquiferDB.scale==1.5 and TidepoolDB.columns==10,'Waterys Satchel settings win')
+AquiferDB=nil; WaterysSatchelDB=nil; TidepoolDB=nil; GridBagDB={columns=6}
+emit('ADDON_LOADED','Aquifer'); assert(AquiferDB.columns==6,'GridBag is the last fallback')
+AquiferDB.columns=8
 
 
 -- 11. controller menus: X/Triangle on an item -> item menu (per item), Triangle on empty -> bag menu
@@ -284,7 +288,7 @@ local function click(btn,phase) if not btn.attrs._onclick then return end Secure
 -- A pad key press = binding click on the bound target (up only), in combat. Runs the _onclick snippet, then the
 -- secure action wrap (post body, owner = header) for macro entries, then PostClick.
 local macroLog={}
-local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelMenu_item.bindings[key] or named.WaterysSatchelMenu_bag.bindings[key])[1]
+local function padclick(key) local t=(nav.bindings[key] or named.AquiferMenu_item.bindings[key] or named.AquiferMenu_bag.bindings[key])[1]
     if t.scripts.PreClick then t.scripts.PreClick(t,'LeftButton',false) end
     combat=true; click(t,'up')
     if t.wraps and t.wraps.OnClick and t.wraps.OnClick.pre then SecureHandlerExecute(t,t.wraps.OnClick.pre,'LeftButton',false,t.wraps.OnClick.header) end
@@ -294,12 +298,12 @@ local function padclick(key) local t=(nav.bindings[key] or named.WaterysSatchelM
     combat=false
     if t.scripts.PostClick then t.scripts.PostClick(t,'LeftButton') end end
 -- client rules the mock models
-assert(named.WaterysSatchelMenu_item.noMethodSetFrameRef and named.WaterysSatchelMenu_item.SetFrameRef==nil,'Backdrop+SecureHandler frame has no :SetFrameRef')
-assert(named.WaterysSatchelMenu_item.refs.e1==named.WaterysSatchelMenu_item_use and named.WaterysSatchelMenu_item.refs.nav==nav)
-assert(named.WaterysSatchelFrame.protected,'main window is protected (CLOSE_BAG Hide needs it)')
-assert(not named.WaterysSatchelSettings.protected and not named.WaterysSatchelMinimapButton.protected)
+assert(named.AquiferMenu_item.noMethodSetFrameRef and named.AquiferMenu_item.SetFrameRef==nil,'Backdrop+SecureHandler frame has no :SetFrameRef')
+assert(named.AquiferMenu_item.refs.e1==named.AquiferMenu_item_use and named.AquiferMenu_item.refs.nav==nav)
+assert(named.AquiferFrame.protected,'main window is protected (CLOSE_BAG Hide needs it)')
+assert(not named.AquiferSettings.protected and not named.AquiferMinimapButton.protected)
 GB.Open()
-local im=named.WaterysSatchelMenu_item; local bm=named.WaterysSatchelMenu_bag
+local im=named.AquiferMenu_item; local bm=named.AquiferMenu_bag
 local labels={}; for i,d in ipairs(GB.ITEM_MENU) do labels[d.key]=d.label end
 assert(#GB.ITEM_MENU==6 and labels.use=='Use' and labels.equip=='Equip' and labels.bind=='Bind' and labels.split=='Split' and labels.link=='Share in Chat' and labels.destroy=='Destroy')
 assert(GB.BAG_MENU[1].label=='Cleanup' and GB.BAG_MENU[2].label=='Sell Junk')
@@ -321,38 +325,38 @@ assert(keys('ore',20)=='bind,split,link,destroy')
 -- items in the bag
 local function setItem(slot,link,count,q) items['0:'..slot]={iconFileID=slot,stackCount=count,quality=q or 1,hyperlink=link,itemID=100+slot} end
 items={}; setItem(1,'potion',5,1); setItem(2,'sword',1,4); setItem(3,'junk',1,0); GB.Refresh()
-assert(named.WaterysSatchelSlot1.attrs.m_use==1 and named.WaterysSatchelSlot1.attrs.m_split==1 and not named.WaterysSatchelSlot1.attrs.m_equip)
-assert(named.WaterysSatchelSlot2.attrs.m_equip==1 and not named.WaterysSatchelSlot2.attrs.m_use and not named.WaterysSatchelSlot2.attrs.m_split)
-assert(not named.WaterysSatchelSlot4.attrs.hasitem and named.WaterysSatchelSlot1.attrs.hasitem==1)
+assert(named.AquiferSlot1.attrs.m_use==1 and named.AquiferSlot1.attrs.m_split==1 and not named.AquiferSlot1.attrs.m_equip)
+assert(named.AquiferSlot2.attrs.m_equip==1 and not named.AquiferSlot2.attrs.m_use and not named.AquiferSlot2.attrs.m_split)
+assert(not named.AquiferSlot4.attrs.hasitem and named.AquiferSlot1.attrs.hasitem==1)
 local function visibleEntries() local o={} for i=1,6 do local e=im.refs['e'..i]; if e.visible then o[#o+1]=e.attrs.key end end return table.concat(o,',') end
 local function show(key) im.visible=false; for i=1,6 do im.refs['e'..i].visible=true end
-    SecureHandlerExecute(named.WaterysSatchelMenuOpen_x,'',nil,nil) end
+    SecureHandlerExecute(named.AquiferMenuOpen_x,'',nil,nil) end
 -- X on the potion: item menu with Use, no Equip; Use is a secure macro
 nav.attrs.focus=1; padclick('PAD1')
 assert(im.visible and not nav.bindings.PAD1 and visibleEntries()=='use,bind,split,link,destroy',visibleEntries())
 assert(im.attrs.count==5 and im.height==5*22+10)
-local use=named.WaterysSatchelMenu_item_use
+local use=named.AquiferMenu_item_use
 assert(use.attrs.type=='macro' and use.attrs.macrotext=='/use 0 1' and use.template=='SecureActionButtonTemplate')
-assert(im.bindings.PAD1[1]==use and im.bindings.PAD2[1]==named.WaterysSatchelMenuClose_item)
+assert(im.bindings.PAD1[1]==use and im.bindings.PAD2[1]==named.AquiferMenuClose_item)
 -- anchored to a protected frame (the restricted SetPoint check in the mock would have raised otherwise)
-assert(im.point[2]==named.WaterysSatchelSlot1)
+assert(im.point[2]==named.AquiferSlot1)
 -- d-pad chooses; v-map skips hidden entries; wraps
 local function menupad(m,d) local b=m.bindings[d=='up' and 'PADDUP' or 'PADDDOWN'][1]; combat=true; click(b,'up'); combat=false end
-menupad(im,'down'); assert(im.attrs.sel==2 and im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_bind)
-menupad(im,'up'); menupad(im,'up'); assert(im.attrs.sel==5 and im.bindings.PAD1[1]==named.WaterysSatchelMenu_item_destroy)
+menupad(im,'down'); assert(im.attrs.sel==2 and im.bindings.PAD1[1]==named.AquiferMenu_item_bind)
+menupad(im,'up'); menupad(im,'up'); assert(im.attrs.sel==5 and im.bindings.PAD1[1]==named.AquiferMenu_item_destroy)
 -- USE through the secure click path, in combat: macro text, menu closes, pad returns to the grid
 im.attrs.sel=1; im.bindings.PAD1={use,'LeftButton'}; macroLog={}
 padclick('PAD1'); assert(macroLog[1]=='/use 0 1' and not im.visible and nav.bindings.PAD1,'use clicked, menu closed')
 -- Triangle on the sword: SAME item menu, with Equip (and no Use); macro uses the sword slot
 nav.attrs.focus=2; padclick('PAD4')
 assert(im.visible and not bm.visible and visibleEntries()=='equip,bind,link,destroy',visibleEntries())
-local eqb=named.WaterysSatchelMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
+local eqb=named.AquiferMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
 im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macroLog[1]=='/use 0 2' and not im.visible)
 -- Bind handoff round 2: only a secure action delegates to the stock BAG button.
 -- All stock focus/bind methods must remain unreachable from addon Lua.
 do
-  local ownerFrame=named.WaterysSatchelFrame
-  local bindButton=named.WaterysSatchelMenu_item_bind
+  local ownerFrame=named.AquiferFrame
+  local bindButton=named.AquiferMenu_item_bind
   local opens, placements, iconRefreshes=0,0,0
   local stock={shown=false}
   function stock:IsShown() return self.shown end
@@ -395,14 +399,14 @@ do
   -- Next physical input belongs to Blizzard: native bag menu opens native binding.
   secure=true;preferredTarget();stock.shown=true;secure=false
   GB.PollControllerBind();assert(not ownerFrame.visible)
-  emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall');assert(not WaterysSatchelDB.bindBlocked)
-  emit('ADDON_ACTION_FORBIDDEN','WaterysSatchel','SetPreferredGamepadInteractTarget')
-  assert(WaterysSatchelDB.bindBlocked.action=='SetPreferredGamepadInteractTarget')
+  emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall');assert(not AquiferDB.bindBlocked)
+  emit('ADDON_ACTION_FORBIDDEN','Aquifer','SetPreferredGamepadInteractTarget')
+  assert(AquiferDB.bindBlocked.action=='SetPreferredGamepadInteractTarget')
   stock.shown=false;GB.PollControllerBind();assert(not ownerFrame.visible,'stock bags still open')
   GB.CancelControllerBind();assert(not ownerFrame.visible,'cancel must not force-close stock bags')
   secure=true;CloseAllBags();secure=false
   combat=true;GB.PollControllerBind();assert(not ownerFrame.visible)
-  combat=false;named.WaterysSatchelEvents.scripts.OnUpdate(nil,.2)
+  combat=false;named.AquiferEvents.scripts.OnUpdate(nil,.2)
   assert(ownerFrame.visible and nav.bindings.PAD1 and not nav.attrs.bindinghandoff)
   -- Correct native bag button, not always the backpack.
   items['2:1']={itemID=999,hyperlink='otherbag'}
@@ -412,21 +416,21 @@ do
   secure=true;CloseAllBags();secure=false;GB.PollControllerBind()
   -- Missing native button: manual stock-bag key; do not immediately reclaim input.
   MainMenuBarBackpackButton=nil
-  assert(GB.StartControllerBind(named.WaterysSatchelSlot1,bindButton))
+  assert(GB.StartControllerBind(named.AquiferSlot1,bindButton))
   assert(bindButton.attrs.type==nil)
   GB.PollControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
   GB.Slash('bindcancel');assert(ownerFrame.visible and nav.bindings.PAD1)
   -- Programmatic handoff does not invoke any native method or alter the cursor.
-  assert(GB.StartControllerBind(named.WaterysSatchelSlot1));GB.PollControllerBind()
+  assert(GB.StartControllerBind(named.AquiferSlot1));GB.PollControllerBind()
   assert(not ownerFrame.visible)
   secure=true;OpenAllBags();secure=false;GB.PollControllerBind()
   GB.SetEnabled(false);secure=true;CloseAllBags();secure=false;GB.PollControllerBind()
   assert(not ownerFrame.visible and next(nav.bindings)==nil)
   GB.SetEnabled(true);GB.Open()
-  combat=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1,bindButton));combat=false
-  stock.shown=true;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));stock.shown=false
-  items['0:1'].itemID=nil;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));items['0:1'].itemID=101
-  CursorHasItem=function() return true end;assert(not GB.StartControllerBind(named.WaterysSatchelSlot1));CursorHasItem=nil
+  combat=true;assert(not GB.StartControllerBind(named.AquiferSlot1,bindButton));combat=false
+  stock.shown=true;assert(not GB.StartControllerBind(named.AquiferSlot1));stock.shown=false
+  items['0:1'].itemID=nil;assert(not GB.StartControllerBind(named.AquiferSlot1));items['0:1'].itemID=101
+  CursorHasItem=function() return true end;assert(not GB.StartControllerBind(named.AquiferSlot1));CursorHasItem=nil
   assert(iconRefreshes>=4)
   ContainerFrame1.scripts.OnHide=oldHide
   GamepadActionBarEditFrame=nil;GamepadMode=nil;securecallfunction=nil
@@ -435,40 +439,40 @@ io.stdout:write('PASS: native stock-bag secure click, no addon BindItem/focus/se
 
 local oldprint=print
 -- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
-assert(named.WaterysSatchelQuick.attrs.useOnKeyDown==false and eqb.attrs.useOnKeyDown==false and named.WaterysSatchelMenu_item_use.attrs.useOnKeyDown==false)
-do local q=named.WaterysSatchelQuick; q.attrs.type=nil; q.attrs.macrotext='stale'; nav.attrs.focus=1
+assert(named.AquiferQuick.attrs.useOnKeyDown==false and eqb.attrs.useOnKeyDown==false and named.AquiferMenu_item_use.attrs.useOnKeyDown==false)
+do local q=named.AquiferQuick; q.attrs.type=nil; q.attrs.macrotext='stale'; nav.attrs.focus=1
   local w=q.wraps.OnClick; SecureHandlerExecute(q,w.pre,'LeftButton',false,w.header)
   assert(q.attrs.type=='macro' and q.attrs.macrotext=='/use 0 1','pre-body fills type+macrotext before the click') end
 -- probe prints and saves
 do local lines={}; print=function(...) lines[#lines+1]=table.concat({...},' ') end
   ContainerFrameCombinedBags=nil; BindFooThing=function() end; C_GamePad={GetDeviceMappedState=function() end}
   GB.Slash('probe'); print=oldprint
-  assert(#lines>3 and WaterysSatchelDB.probe and #WaterysSatchelDB.probe>2,'probe output saved')
+  assert(#lines>3 and AquiferDB.probe and #AquiferDB.probe>2,'probe output saved')
   local all=table.concat(lines,' '); assert(all:find('BindFooThing') and all:find('C_GamePad')) end
 -- Destroy uses the game's confirm popup (rare+ needs typed DELETE)
 local shown; StaticPopup_Show=function(w,l) shown={w,l} end; StaticPopupDialogs={DELETE_ITEM={},DELETE_GOOD_ITEM={}}
 nav.attrs.focus=2; setItem(2,'sword',1,4); GB.Refresh(); padclick('PAD1')
-im.bindings.PAD1={named.WaterysSatchelMenu_item_destroy,'LeftButton'}; padclick('PAD1')
+im.bindings.PAD1={named.AquiferMenu_item_destroy,'LeftButton'}; padclick('PAD1')
 assert(shown and shown[1]=='DELETE_GOOD_ITEM','epic needs typed confirm')
 -- Share + Split
 local linked; ChatEdit_InsertLink=function(l) linked=l end
-nav.attrs.focus=1; padclick('PAD1'); im.bindings.PAD1={named.WaterysSatchelMenu_item_link,'LeftButton'}; padclick('PAD1'); assert(linked=='potion')
+nav.attrs.focus=1; padclick('PAD1'); im.bindings.PAD1={named.AquiferMenu_item_link,'LeftButton'}; padclick('PAD1'); assert(linked=='potion')
 local split; C_Container.SplitContainerItem=function(b,s,n) split={b,s,n} end
-padclick('PAD1'); im.bindings.PAD1={named.WaterysSatchelMenu_item_split,'LeftButton'}; padclick('PAD1'); assert(split and split[3]==2)
+padclick('PAD1'); im.bindings.PAD1={named.AquiferMenu_item_split,'LeftButton'}; padclick('PAD1'); assert(split and split[3]==2)
 -- Circle closes the menu first, then the bag (restricted Hide of the protected window, in combat)
-padclick('PAD1'); assert(im.visible); padclick('PAD2'); assert(not im.visible and nav.bindings.PAD2[1]==named.WaterysSatchelCloseBag)
-padclick('PAD2'); assert(not named.WaterysSatchelFrame.visible,'second Circle closes bag')
+padclick('PAD1'); assert(im.visible); padclick('PAD2'); assert(not im.visible and nav.bindings.PAD2[1]==named.AquiferCloseBag)
+padclick('PAD2'); assert(not named.AquiferFrame.visible,'second Circle closes bag')
 -- X on an empty slot: no menu; with an item on the cursor it drops there
 GB.Open(); nav.attrs.focus=5; padclick('PAD1'); assert(not im.visible and not bm.visible)
 CursorHasItem=function() return true end; picked=nil; padclick('PAD1'); assert(picked and picked[2]==5,'X drops cursor item on empty slot'); CursorHasItem=nil
 -- Triangle on an EMPTY slot: bag menu (Cleanup, Sell Junk); anchored to protected slot 1
 local sorted=false; C_Container.SortBags=function() sorted=true end
-nav.attrs.focus=5; padclick('PAD4'); assert(bm.visible and not im.visible and bm.point[2]==named.WaterysSatchelSlot1)
-bm.bindings.PAD1={named.WaterysSatchelMenu_bag_cleanup,'LeftButton'}; padclick('PAD1'); assert(sorted and not bm.visible)
+nav.attrs.focus=5; padclick('PAD4'); assert(bm.visible and not im.visible and bm.point[2]==named.AquiferSlot1)
+bm.bindings.PAD1={named.AquiferMenu_bag_cleanup,'LeftButton'}; padclick('PAD1'); assert(sorted and not bm.visible)
 local sold=false; C_Container.SellAllJunkItems=function() sold=true end
-padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(not sold,'no vendor, no sale')
+padclick('PAD4'); bm.bindings.PAD1={named.AquiferMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(not sold,'no vendor, no sale')
 MerchantFrame=frame('Frame','MerchantFrame'); MerchantFrame.visible=true
-padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(sold)
+padclick('PAD4'); bm.bindings.PAD1={named.AquiferMenu_bag_junk,'LeftButton'}; padclick('PAD1'); assert(sold)
 MerchantFrame.visible=false
 -- the bag menu is also reachable from every empty slot, but an item slot never opens it
 nav.attrs.focus=1; padclick('PAD4'); assert(im.visible and not bm.visible); padclick('PAD2')
@@ -478,23 +482,23 @@ macroLog={}; nav.attrs.focus=2; padclick('PAD3'); assert(macroLog[1]=='/use 0 2'
 macroLog={}; nav.attrs.focus=5; padclick('PAD3'); assert(macroLog[1]=='','empty slot: no macro')
 assert(GB.QuickLabel('sword',1)=='Equip' and GB.QuickLabel('potion',1)=='Use')
 -- Hide empty slots: setting + bag menu entry
-GB.SetCollapsed(true); assert(WaterysSatchelDB.collapsed and nav.attrs.count==3,'collapsed count '..tostring(nav.attrs.count))
-GB.SetCollapsed(false); assert(not WaterysSatchelDB.collapsed and nav.attrs.count==28)
-assert(named.WaterysSatchelCheckHide, 'settings tick box')
-nav.attrs.focus=5; padclick('PAD4'); bm.bindings.PAD1={named.WaterysSatchelMenu_bag_hide,'LeftButton'}; padclick('PAD1')
-assert(WaterysSatchelDB.collapsed and nav.attrs.count==3,'bag menu toggle'); GB.ToggleCollapse(); assert(not WaterysSatchelDB.collapsed)
+GB.SetCollapsed(true); assert(AquiferDB.collapsed and nav.attrs.count==3,'collapsed count '..tostring(nav.attrs.count))
+GB.SetCollapsed(false); assert(not AquiferDB.collapsed and nav.attrs.count==28)
+assert(named.AquiferCheckHide, 'settings tick box')
+nav.attrs.focus=5; padclick('PAD4'); bm.bindings.PAD1={named.AquiferMenu_bag_hide,'LeftButton'}; padclick('PAD1')
+assert(AquiferDB.collapsed and nav.attrs.count==3,'bag menu toggle'); GB.ToggleCollapse(); assert(not AquiferDB.collapsed)
 -- SplitStack on every slot (StackSplitFrame calls owner:SplitStack(n))
 local sp; C_Container.SplitContainerItem=function(b,s,n) sp={b,s,n} end
-assert(type(named.WaterysSatchelSlot1.SplitStack)=='function'); named.WaterysSatchelSlot1:SplitStack(3); assert(sp[1]==0 and sp[2]==1 and sp[3]==3)
+assert(type(named.AquiferSlot1.SplitStack)=='function'); named.AquiferSlot1:SplitStack(3); assert(sp[1]==0 and sp[2]==1 and sp[3]==3)
 -- Split opens the stock frame with (max, owner, anchor, anchorTo)
 local so; StackSplitFrame={OpenStackSplitFrame=function(self,mx,o,a,at) so={mx,o,a,at} end,IsShown=function() return true end}
-GB.MenuActions.split(named.WaterysSatchelSlot1); assert(so[1]==5 and so[2]==named.WaterysSatchelSlot1 and so[4]=='TOPRIGHT'); StackSplitFrame=nil
+GB.MenuActions.split(named.AquiferSlot1); assert(so[1]==5 and so[2]==named.AquiferSlot1 and so[4]=='TOPRIGHT'); StackSplitFrame=nil
 -- Share opens chat with the link
 local opened; ChatFrame_OpenChat=function(t,cf) opened=t end
 GB.OpenChatWith('[x]'); assert(opened=='[x]'); ChatFrame_OpenChat=nil
 -- footer follows the focus: item -> Item Menu, empty -> Bag Menu
 local footer=nil
-nav.attrs.focus=1; GB.UpdateFooter(); local ft=named.WaterysSatchelFrame.scripts.OnShow and true
+nav.attrs.focus=1; GB.UpdateFooter(); local ft=named.AquiferFrame.scripts.OnShow and true
 local function footerText() for _,f in ipairs(frames) do if f.kind=='FontString' and type(f.text)=='string' and f.text:find('Close') then return f.text end end end
 assert(footerText():find('Item Menu') and not footerText():find('Bag Menu'),'item footer: '..tostring(footerText()))
 assert(footerText():find('Use') or footerText():find('Equip'),'quick label'); nav.attrs.focus=5; GB.UpdateFooter(); assert(footerText():find('Bag Menu') and footerText():find('Place'),'empty footer: '..tostring(footerText()))
@@ -502,16 +506,16 @@ assert(footerText():find('Use') or footerText():find('Equip'),'quick label'); na
 assert(GB.Glyph('cross'):find('%[X%]') and GB.Glyph('triangle'):find('Tri'))
 C_Texture={GetAtlasInfo=function(a) return a=='Gamepad_Ltr_Cross_64' and {} or nil end}; GB.ResetGlyphs()
 assert(GB.Glyph('cross')=='|A:Gamepad_Ltr_Cross_64:18:18|a' and GB.Glyph('circle'):find('%[O%]'))
-GB.Slash('glyph circle MyCircle'); assert(WaterysSatchelDB.glyph.circle=='MyCircle')
+GB.Slash('glyph circle MyCircle'); assert(AquiferDB.glyph.circle=='MyCircle')
 C_Texture={GetAtlasInfo=function(a) return a=='MyCircle' and {} or nil end}; GB.ResetGlyphs(); assert(GB.Glyph('circle')=='|A:MyCircle:18:18|a')
 GB.Slash('glyphs'); C_Texture=nil; GB.ResetGlyphs()
 assert(GB.MenuHints():find('Select') and GB.MenuHints():find('Close'))
 -- Escape: in UISpecialFrames out of combat, removed in combat (Hide on a protected frame is blocked there)
-emit('PLAYER_REGEN_DISABLED'); local inEsc=false for _,n in ipairs(UISpecialFrames) do if n=='WaterysSatchelFrame' then inEsc=true end end; assert(not inEsc)
-emit('PLAYER_REGEN_ENABLED'); for _,n in ipairs(UISpecialFrames) do if n=='WaterysSatchelFrame' then inEsc=true end end; assert(inEsc)
+emit('PLAYER_REGEN_DISABLED'); local inEsc=false for _,n in ipairs(UISpecialFrames) do if n=='AquiferFrame' then inEsc=true end end; assert(not inEsc)
+emit('PLAYER_REGEN_ENABLED'); for _,n in ipairs(UISpecialFrames) do if n=='AquiferFrame' then inEsc=true end end; assert(inEsc)
 -- restricted code must not anchor to the unprotected window (mock models the client rule)
-secure=true; assert(not pcall(named.WaterysSatchelNav.SetPoint,named.WaterysSatchelNav,'TOPLEFT',named.WaterysSatchelSettings),'unprotected relative frame must be rejected'); assert(pcall(named.WaterysSatchelNav.SetPoint,named.WaterysSatchelNav,'TOPLEFT',named.WaterysSatchelSlot1)); secure=false
-assert(not pcall(function() named.WaterysSatchelMenu_item:SetFrameRef('x',nav) end),'no :SetFrameRef on Backdrop+SecureHandler frames')
+secure=true; assert(not pcall(named.AquiferNav.SetPoint,named.AquiferNav,'TOPLEFT',named.AquiferSettings),'unprotected relative frame must be rejected'); assert(pcall(named.AquiferNav.SetPoint,named.AquiferNav,'TOPLEFT',named.AquiferSlot1)); secure=false
+assert(not pcall(function() named.AquiferMenu_item:SetFrameRef('x',nav) end),'no :SetFrameRef on Backdrop+SecureHandler frames')
 GB.Close()
 items={}
 io.stdout:write('PASS: one-press-one-slot, minimap, search, money, migration, grid order, neighbors, secure d-pad snippet, open/close/default swap, combat safety, Alt-drag\n')

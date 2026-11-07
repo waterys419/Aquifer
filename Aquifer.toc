@@ -1,8 +1,8 @@
 ## Interface: 16001
-## Title: Waterys Satchel
+## Title: Aquifer
 ## Notes: One plain grid bag. Controller d-pad moves to the slot you see next to you.
 ## Author: Audrey
 ## Version: 2.0.2
-## SavedVariables: WaterysSatchelDB, TidepoolDB, GridBagDB
+## SavedVariables: AquiferDB, WaterysSatchelDB, TidepoolDB, GridBagDB
 
-WaterysSatchel.lua
+Aquifer.lua

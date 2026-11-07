@@ -1,7 +1,7 @@
--- Waterys Satchel: one combined bag as a plain grid, with explicit controller neighbors. (was GridBag)
+-- Aquifer: one combined bag as a plain grid, with explicit controller neighbors. (was GridBag)
 local addonName = ...
 local GB = {}
-_G.WaterysSatchel = GB
+_G.Aquifer = GB
 
 local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false }
 local MM_DEFAULT = { angle = 215, hide = false }
@@ -144,7 +144,7 @@ end
 
 -- ---------- slots ----------
 local function makeSlot(i)
-    local b = CreateFrame("Button", "WaterysSatchelSlot" .. i, frame, "SecureActionButtonTemplate,BackdropTemplate")
+    local b = CreateFrame("Button", "AquiferSlot" .. i, frame, "SecureActionButtonTemplate,BackdropTemplate")
     b:SetSize(SLOT, SLOT)
     b:RegisterForClicks("AnyUp")
     b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
@@ -155,7 +155,7 @@ local function makeSlot(i)
     b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     b.count:SetPoint("BOTTOMRIGHT", -3, 3)
-    b.cd = CreateFrame("Cooldown", "WaterysSatchelCD" .. i, b, "CooldownFrameTemplate")
+    b.cd = CreateFrame("Cooldown", "AquiferCD" .. i, b, "CooldownFrameTemplate")
     b.cd:SetAllPoints(b.icon)
     b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
     b.index = i
@@ -450,7 +450,7 @@ end
 -- ---------- controller button hints (footer) ----------
 -- The stock UI draws PlayStation art from the client's atlas. This client ships no readable UI
 -- code, so the exact atlas names could not be read from disk. We probe likely names at run time
--- (and /satchel glyph <button> <atlas> can set one by hand). Fallback: plain yellow text.
+-- (and /aquifer glyph <button> <atlas> can set one by hand). Fallback: plain yellow text.
 local GLYPH_WORD = { cross = { "Cross", "X" }, circle = { "Circle", "B" }, square = { "Square", "X" }, triangle = { "Triangle", "Y" } }
 local GLYPH_PATTERNS = { "Gamepad_Ltr_%s_%d", "Gamepad_Rev_%s_%d", "Gamepad_Gen_%s_%d", "Gamepad_%s_%d",
     "Gamepad_PS_%s_%d", "Gamepad_Playstation_%s_%d" }
@@ -530,7 +530,7 @@ local function menuSlot()
     local b = i and slots[i]
     if b and b.bag then return b end
 end
-local function say2(m) print("|cff66ccffWaterys Satchel|r " .. m) end
+local function say2(m) print("|cff66ccffAquifer|r " .. m) end
 local function itemLink(b)
     local _, _, _, _, link = itemInfo(b.bag, b.slot)
     return link
@@ -616,7 +616,7 @@ function GB.StartControllerBind(b, clickButton)
     end
     say2("Blizzard bag: select " .. (info.hyperlink or ("item " .. info.itemID)) .. ", then More Actions > Bind to Action Bar. Close Blizzard's bags to return.")
     if not (nativeBagShown or (clickButton and nativeBagButton)) then
-        say2("Press your normal Bags button first. /satchel bindcancel cancels this handoff.")
+        say2("Press your normal Bags button first. /aquifer bindcancel cancels this handoff.")
     end
     return true
 end
@@ -645,7 +645,7 @@ function GB.Probe()
         end
     end
     table.sort(names)
-    add("probe: " .. #names .. " global names (full list saved in WaterysSatchelDB.probe)")
+    add("probe: " .. #names .. " global names (full list saved in AquiferDB.probe)")
     local line = ""
     for _, n in ipairs(names) do
         if #line + #n > 200 then say2(line); line = "" end
@@ -760,7 +760,7 @@ end
 GB.MenuOpened = menuOpened
 
 local function newMenu(kind, defs, parent)
-    local m = CreateFrame("Frame", "WaterysSatchelMenu_" .. kind, parent, "SecureHandlerBaseTemplate,BackdropTemplate")
+    local m = CreateFrame("Frame", "AquiferMenu_" .. kind, parent, "SecureHandlerBaseTemplate,BackdropTemplate")
     m:SetFrameStrata("DIALOG")
     m:SetClampedToScreen(true)
     m:SetSize(150, #defs * 22 + 10)
@@ -774,7 +774,7 @@ local function newMenu(kind, defs, parent)
     for i = 1, #defs do m:SetAttribute("v" .. i, i) end
     SetRef(m, "nav", nav)
     m:Hide()
-    local mhl = CreateFrame("Frame", "WaterysSatchelMenuFocus_" .. kind, m, "BackdropTemplate")
+    local mhl = CreateFrame("Frame", "AquiferMenuFocus_" .. kind, m, "BackdropTemplate")
     mhl:SetFrameLevel(m:GetFrameLevel() + 20)
     mhl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
     mhl:SetBackdropBorderColor(1, 0.9, 0.2, 1)
@@ -786,7 +786,7 @@ local function newMenu(kind, defs, parent)
     for i, def in ipairs(defs) do
         local secureAction = (def.key == "use" or def.key == "equip")
         local stockBind = def.key == "bind"
-        local e = CreateFrame("Button", "WaterysSatchelMenu_" .. kind .. "_" .. def.key, m,
+        local e = CreateFrame("Button", "AquiferMenu_" .. kind .. "_" .. def.key, m,
             (secureAction or stockBind) and "SecureActionButtonTemplate" or "SecureActionButtonTemplate,SecureHandlerClickTemplate")
         e:SetSize(140, 20)
         e:SetPoint("TOPLEFT", m, "TOPLEFT", 5, -5 - (i - 1) * 22)
@@ -820,7 +820,7 @@ local function newMenu(kind, defs, parent)
                 end
                 GB.PollControllerBind()
                 if bindHandoff and not stockBindUIShown() then
-                    say2("If the Blizzard bag did not open, press your normal Bags button. /satchel bindcancel returns to Satchel.")
+                    say2("If the Blizzard bag did not open, press your normal Bags button. /aquifer bindcancel returns to Aquifer.")
                 end
                 return
             end
@@ -839,14 +839,14 @@ local function newMenu(kind, defs, parent)
         m.entries[i] = e
     end
     for _, d in ipairs({ "up", "down" }) do
-        local btn = CreateFrame("Button", "WaterysSatchelMenuPad_" .. kind .. d, m, "SecureHandlerClickTemplate")
+        local btn = CreateFrame("Button", "AquiferMenuPad_" .. kind .. d, m, "SecureHandlerClickTemplate")
         btn:SetAttribute("dir", d)
         SetRef(btn, "menu", m)
         btn:SetAttribute("_onclick", MENU_MOVE)
         btn:RegisterForClicks("AnyUp")
         SetRef(m, d, btn)
     end
-    local cb = CreateFrame("Button", "WaterysSatchelMenuClose_" .. kind, m, "SecureHandlerClickTemplate")
+    local cb = CreateFrame("Button", "AquiferMenuClose_" .. kind, m, "SecureHandlerClickTemplate")
     SetRef(cb, "menu", m)
     cb:SetAttribute("_onclick", MENU_CLOSE)
     cb:RegisterForClicks("AnyUp")
@@ -879,22 +879,22 @@ local function buildMenu(parent)
     local bm = newMenu("bag", BAG_MENU, parent)
     GB.itemMenu, GB.bagMenu = im, bm
     -- X: item menu on an item (cursor drop handled in PostClick). Triangle: item menu on an item, bag menu on an empty slot.
-    local xo = newOpener("WaterysSatchelMenuOpen_x", "x", im, bm, parent)
+    local xo = newOpener("AquiferMenuOpen_x", "x", im, bm, parent)
     xo:SetScript("PostClick", menuOpened)
-    local to = newOpener("WaterysSatchelMenuOpen_tri", "tri", im, bm, parent)
+    local to = newOpener("AquiferMenuOpen_tri", "tri", im, bm, parent)
     GB.openX, GB.openTri = xo, to
     SetRef(nav, "itemopen", xo)
     SetRef(nav, "triopen", to)
     for _, m in ipairs({ im, bm }) do m.hint:SetText(GB.MenuHints()) end
     GB.UpdateMenuLabels()
-    local cl = CreateFrame("Button", "WaterysSatchelCloseBag", parent, "SecureHandlerClickTemplate")
+    local cl = CreateFrame("Button", "AquiferCloseBag", parent, "SecureHandlerClickTemplate")
     SetRef(cl, "frame", parent)
     cl:SetAttribute("_onclick", CLOSE_BAG)
     cl:RegisterForClicks("AnyUp")
     SetRef(nav, "closebag", cl)
     -- Square: quick action on the focused item (Equip if equippable, else Use if usable). A secure
     -- macro button; the pre-body of the wrap fills "/use <bag> <slot>" from the focused slot.
-    local qa = CreateFrame("Button", "WaterysSatchelQuick", parent, "SecureActionButtonTemplate,SecureHandlerBaseTemplate")
+    local qa = CreateFrame("Button", "AquiferQuick", parent, "SecureActionButtonTemplate,SecureHandlerBaseTemplate")
     qa:RegisterForClicks("AnyUp")
     qa:SetAttribute("type", "macro")
     qa:SetAttribute("useOnKeyDown", false)   -- we register up-clicks only; with ActionButtonUseKeyDown=1 the secure handler would otherwise ignore them
@@ -910,9 +910,9 @@ GB.MENU_OPEN, GB.MENU_MOVE, GB.MENU_CLOSE, GB.MENU_SHUT, GB.NAV_CLAMP, GB.CLOSE_
 -- Escape closes the window only out of combat: Hide() on a protected frame is blocked in combat.
 function GB.SetEsc(on)
     for i = #UISpecialFrames, 1, -1 do
-        if UISpecialFrames[i] == "WaterysSatchelFrame" then table.remove(UISpecialFrames, i) end
+        if UISpecialFrames[i] == "AquiferFrame" then table.remove(UISpecialFrames, i) end
     end
-    if on then table.insert(UISpecialFrames, "WaterysSatchelFrame") end
+    if on then table.insert(UISpecialFrames, "AquiferFrame") end
 end
 function GB.IsOpen() return frame and frame:IsShown() end
 
@@ -937,7 +937,7 @@ function GB.Toggle() if GB.IsOpen() then GB.Close() else GB.Open() end end
 local function build()
     -- Secure template on purpose: restricted snippets (Circle = CLOSE_BAG) may only Hide a protected frame.
     -- Consequence: show / hide / move / resize only outside combat (all of those are guarded below).
-    frame = CreateFrame("Frame", "WaterysSatchelFrame", UIParent, "SecureHandlerBaseTemplate,BackdropTemplate")
+    frame = CreateFrame("Frame", "AquiferFrame", UIParent, "SecureHandlerBaseTemplate,BackdropTemplate")
     frame:SetFrameStrata("HIGH")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -956,7 +956,7 @@ local function build()
     footer = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     footer:SetPoint("BOTTOMLEFT", PAD, 8)
     -- Search box. Only reachable by mouse/cursor click: the d-pad grid never lands on it.
-    search = CreateFrame("EditBox", "WaterysSatchelSearch", frame, "InputBoxTemplate")
+    search = CreateFrame("EditBox", "AquiferSearch", frame, "InputBoxTemplate")
     search:SetSize(110, 18)
     search:SetPoint("TOPLEFT", PAD + 6, -6)
     search:SetAutoFocus(false)
@@ -971,8 +971,8 @@ local function build()
     frame:Hide()
     GB.SetEsc(true)
 
-    nav = CreateFrame("Frame", "WaterysSatchelNav", frame, "SecureHandlerBaseTemplate")
-    hl = CreateFrame("Frame", "WaterysSatchelFocus", frame, "BackdropTemplate")
+    nav = CreateFrame("Frame", "AquiferNav", frame, "SecureHandlerBaseTemplate")
+    hl = CreateFrame("Frame", "AquiferFocus", frame, "BackdropTemplate")
     hl:SetSize(SLOT + 4, SLOT + 4)
     hl:SetFrameLevel(frame:GetFrameLevel() + 20)
     hl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 3 })
@@ -981,7 +981,7 @@ local function build()
     SetRef(nav, "hl", hl)
     buildMenu(frame)
     for _, d in ipairs({ "up", "down", "left", "right" }) do
-        local btn = CreateFrame("Button", "WaterysSatchelPad" .. d, frame, "SecureHandlerClickTemplate")
+        local btn = CreateFrame("Button", "AquiferPad" .. d, frame, "SecureHandlerClickTemplate")
         btn:SetAttribute("dir", d)
         SetRef(btn, "nav", nav)
         btn:SetAttribute("_onclick", NAV_MOVE)
@@ -1021,7 +1021,7 @@ end
 
 local function buildMinimap()
     if not Minimap then return end
-    local b = CreateFrame("Button", "WaterysSatchelMinimapButton", Minimap)
+    local b = CreateFrame("Button", "AquiferMinimapButton", Minimap)
     mmButton = b
     b:SetSize(31, 31)
     b:SetFrameStrata("MEDIUM")
@@ -1058,7 +1058,7 @@ local function buildMinimap()
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Waterys Satchel")
+        GameTooltip:SetText("Aquifer")
         GameTooltip:AddLine("Left click: open / close bag", 1, 1, 1)
         GameTooltip:AddLine("Right click: settings", 1, 1, 1)
         GameTooltip:AddLine("Drag: move this button", 1, 1, 1)
@@ -1072,7 +1072,7 @@ function GB.SetMinimapHidden(h) DB.minimap.hide = h and true or false; GB.PlaceM
 
 -- ---------- settings window ----------
 local function buildSettings()
-    local f = CreateFrame("Frame", "WaterysSatchelSettings", UIParent, "BackdropTemplate")
+    local f = CreateFrame("Frame", "AquiferSettings", UIParent, "BackdropTemplate")
     settings = f
     f:SetSize(240, 216); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
     f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
@@ -1082,7 +1082,7 @@ local function buildSettings()
     f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     t:SetPoint("TOPLEFT", 12, -10); t:SetText("|cff55ccffSettings|r")
-    local close = CreateFrame("Button", "WaterysSatchelSettingsClose", f, "UIPanelCloseButton")
+    local close = CreateFrame("Button", "AquiferSettingsClose", f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 2, 2)
     local function check(name, y, label, get, set)
         local c = CreateFrame("CheckButton", name, f, "UICheckButtonTemplate")
@@ -1094,10 +1094,10 @@ local function buildSettings()
         return c
     end
     f.checks = {
-        check("WaterysSatchelCheckMinimap", -34, "Hide minimap icon", function() return DB.minimap.hide end, GB.SetMinimapHidden),
-        check("WaterysSatchelCheckPad", -60, "Controller d-pad in bag", function() return DB.padNav end, function(v) GB.SetPad(v) end),
-        check("WaterysSatchelCheckBag", -86, "Use Waterys Satchel instead of normal bag", function() return DB.enabled end, function(v) GB.SetEnabled(v) end),
-        check("WaterysSatchelCheckHide", -112, "Hide empty slots", function() return DB.collapsed end, function(v) GB.SetCollapsed(v) end),
+        check("AquiferCheckMinimap", -34, "Hide minimap icon", function() return DB.minimap.hide end, GB.SetMinimapHidden),
+        check("AquiferCheckPad", -60, "Controller d-pad in bag", function() return DB.padNav end, function(v) GB.SetPad(v) end),
+        check("AquiferCheckBag", -86, "Use Aquifer instead of normal bag", function() return DB.enabled end, function(v) GB.SetEnabled(v) end),
+        check("AquiferCheckHide", -112, "Hide empty slots", function() return DB.collapsed end, function(v) GB.SetCollapsed(v) end),
     }
     local cl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     cl:SetPoint("TOPLEFT", 14, -152)
@@ -1107,14 +1107,14 @@ local function buildSettings()
         b:SetSize(26, 22); b:SetPoint("TOPLEFT", x, -174); b:SetText(txt)
         b:SetScript("OnClick", function() GB.SetCols(DB.columns + d); f.refresh() end)
     end
-    colBtn("WaterysSatchelColMinus", 14, "-", -1); colBtn("WaterysSatchelColPlus", 44, "+", 1)
+    colBtn("AquiferColMinus", 14, "-", -1); colBtn("AquiferColPlus", 44, "+", 1)
     f.refresh = function()
         cl:SetText("Columns: " .. DB.columns)
         for _, c in ipairs(f.checks) do c.refresh() end
     end
     f:SetScript("OnShow", f.refresh)
     f:Hide()
-    tinsert(UISpecialFrames, "WaterysSatchelSettings")
+    tinsert(UISpecialFrames, "AquiferSettings")
 end
 function GB.ToggleSettings()
     if not settings then return end
@@ -1181,54 +1181,54 @@ function GB.SetEnabled(on)
     if not DB.enabled and GB.IsOpen() then GB.Close() end
 end
 
-local function say(m) print("|cff66ccffWaterys Satchel|r " .. m) end
+local function say(m) print("|cff66ccffAquifer|r " .. m) end
 local function slash(msg)
     local cmd, arg = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = cmd:lower()
     if cmd == "bindcancel" then GB.CancelControllerBind()
     elseif cmd == "" or cmd == "help" then
-        say("/satchel toggle - open or close the bag (also /ws)")
-        say("/satchel settings - settings window")
-        say("/satchel bindcancel - cancel a pending native-bag handoff (close stock bags first)")
-        say("/satchel minimap on|off - minimap icon")
-        say("/satchel search word - grey out other items")
-        say("/satchel cols 8 - slots per row (4 to 20)")
-        say("/satchel default on|off - on = use the normal bag again")
-        say("/satchel pad on|off - controller d-pad moves in the grid")
-        say("/satchel scale 1 - window size (0.5 to 2)")
-        say("/satchel reset - put the window back")
+        say("/aquifer toggle - open or close the bag (also /aq)")
+        say("/aquifer settings - settings window")
+        say("/aquifer bindcancel - cancel a pending native-bag handoff (close stock bags first)")
+        say("/aquifer minimap on|off - minimap icon")
+        say("/aquifer search word - grey out other items")
+        say("/aquifer cols 8 - slots per row (4 to 20)")
+        say("/aquifer default on|off - on = use the normal bag again")
+        say("/aquifer pad on|off - controller d-pad moves in the grid")
+        say("/aquifer scale 1 - window size (0.5 to 2)")
+        say("/aquifer reset - put the window back")
         say("Controller (PlayStation): X or Triangle on an item = item menu (Use, Equip, Bind, Split, Share, Destroy); Triangle on an empty slot = bag menu (Cleanup, Sell Junk, Hide empty slots); Square = quick Equip/Use; Circle = close; d-pad = move.")
-        say("/satchel glyphs - show which button pictures were found; /satchel glyph cross AtlasName sets one")
-        say("/satchel hide on|off - hide empty slots (also a tick box in settings and an entry in the Triangle bag menu)")
-        say("/satchel probe - list the client's bind / gamepad names (send to Claude)")
-        say("/satchel config - show settings")
+        say("/aquifer glyphs - show which button pictures were found; /aquifer glyph cross AtlasName sets one")
+        say("/aquifer hide on|off - hide empty slots (also a tick box in settings and an entry in the Triangle bag menu)")
+        say("/aquifer probe - list the client's bind / gamepad names (send to Claude)")
+        say("/aquifer config - show settings")
         say("Alt + drag moves the window.")
     elseif cmd == "toggle" then GB.Toggle()
     elseif cmd == "settings" or cmd == "options" then GB.ToggleSettings()
     elseif cmd == "minimap" then
         local on = arg:lower()
-        if on ~= "on" and on ~= "off" then return say("Use: /satchel minimap on  or  off") end
+        if on ~= "on" and on ~= "off" then return say("Use: /aquifer minimap on  or  off") end
         GB.SetMinimapHidden(on == "off")
         say("Minimap icon: " .. (DB.minimap.hide and "hidden" or "shown"))
     elseif cmd == "search" then GB.SetQuery(arg); if search then search:SetText(arg) end
     elseif cmd == "cols" or cmd == "columns" then
         local v = tonumber(arg)
-        if not v then return say("Use a number, like /satchel cols 8") end
+        if not v then return say("Use a number, like /aquifer cols 8") end
         GB.SetCols(v); say("Columns: " .. DB.columns)
         if pending then say("In combat. Will apply after.") end
     elseif cmd == "default" then
         local on = arg:lower()
-        if on ~= "on" and on ~= "off" then return say("Use: /satchel default on  or  off") end
+        if on ~= "on" and on ~= "off" then return say("Use: /aquifer default on  or  off") end
         GB.SetEnabled(on == "off")
-        say(DB.enabled and "Waterys Satchel bag is ON." or "Normal bag is back. Waterys Satchel is OFF.")
+        say(DB.enabled and "Aquifer bag is ON." or "Normal bag is back. Aquifer is OFF.")
     elseif cmd == "pad" then
         local on = arg:lower()
-        if on ~= "on" and on ~= "off" then return say("Use: /satchel pad on  or  off") end
+        if on ~= "on" and on ~= "off" then return say("Use: /aquifer pad on  or  off") end
         GB.SetPad(on == "on")
         say("Controller d-pad grid: " .. (DB.padNav and "ON" or "OFF"))
     elseif cmd == "scale" then
         local v = tonumber(arg)
-        if not v then return say("Use a number, like /satchel scale 1") end
+        if not v then return say("Use a number, like /aquifer scale 1") end
         DB.scale = math.max(0.5, math.min(2, v))
         if frame and not inCombat() then frame:SetScale(DB.scale) end
         say("Scale: " .. DB.scale)
@@ -1245,23 +1245,23 @@ local function slash(msg)
         for _, l in ipairs(GB.GlyphReport()) do say(l) end
     elseif cmd == "glyph" then
         local btn, atlas = arg:match("^(%S+)%s+(%S+)$")
-        if not (btn and GLYPH_TEXT[btn:lower()]) then return say("Use: /satchel glyph cross|circle|square|triangle AtlasName") end
+        if not (btn and GLYPH_TEXT[btn:lower()]) then return say("Use: /aquifer glyph cross|circle|square|triangle AtlasName") end
         DB.glyph = DB.glyph or {}; DB.glyph[btn:lower()] = atlas; GB.ResetGlyphs()
         if footer then footer.shownKey = nil end
         say(btn:lower() .. " glyph set to " .. atlas .. (atlasExists(atlas) and "" or " (not found in the client, text fallback stays)"))
     elseif cmd == "config" then
-        say("Waterys Satchel: " .. (DB.enabled and "ON" or "OFF (normal bag)"))
+        say("Aquifer: " .. (DB.enabled and "ON" or "OFF (normal bag)"))
         say("Columns: " .. DB.columns .. "   Scale: " .. DB.scale)
         say("Controller d-pad grid: " .. (DB.padNav and "ON" or "OFF"))
-    else say("Unknown. Type /satchel help") end
+    else say("Unknown. Type /aquifer help") end
 end
 GB.Slash = slash
-SLASH_WATERYSSATCHEL1 = "/satchel"
-SLASH_WATERYSSATCHEL2 = "/ws"
-SlashCmdList.WATERYSSATCHEL = slash
+SLASH_AQUIFER1 = "/aquifer"
+SLASH_AQUIFER2 = "/aq"
+SlashCmdList.AQUIFER = slash
 
 -- ---------- events ----------
-local ev = CreateFrame("Frame", "WaterysSatchelEvents")
+local ev = CreateFrame("Frame", "AquiferEvents")
 local bindPollElapsed = 0
 ev:SetScript("OnUpdate", function(_, elapsed)
     if not bindHandoff then return end
@@ -1273,27 +1273,30 @@ for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "BAG_UPDATE", "BAG_UPDATE_D
 ev:SetScript("OnEvent", function(_, e, a1, a2)
     if (e == "ADDON_ACTION_BLOCKED" or e == "ADDON_ACTION_FORBIDDEN") and bindHandoff and a1 == addonName then
         DB.bindBlocked = { event = e, action = tostring(a2 or "unknown") }
-        say2("Bind blocked at " .. DB.bindBlocked.action .. ". This is saved in /satchel probe.")
+        say2("Bind blocked at " .. DB.bindBlocked.action .. ". This is saved in /aquifer probe.")
         return
     end
     if e == "ADDON_LOADED" and a1 == addonName then
-        -- Migrate settings from the old Tidepool or GridBag addon (once, only if it has none yet).
-        if not WaterysSatchelDB then
-            WaterysSatchelDB = {}
-            if type(TidepoolDB) == "table" then
-                for k, v in pairs(TidepoolDB) do WaterysSatchelDB[k] = v end
+        -- Migrate settings from the old Waterys Satchel, Tidepool or GridBag addon (once, only if it has none yet).
+        if not AquiferDB then
+            AquiferDB = {}
+            if type(WaterysSatchelDB) == "table" then
+                for k, v in pairs(WaterysSatchelDB) do AquiferDB[k] = v end
             end
-            if next(WaterysSatchelDB) == nil and type(GridBagDB) == "table" then
-                for k, v in pairs(GridBagDB) do WaterysSatchelDB[k] = v end
+            if next(AquiferDB) == nil and type(TidepoolDB) == "table" then
+                for k, v in pairs(TidepoolDB) do AquiferDB[k] = v end
+            end
+            if next(AquiferDB) == nil and type(GridBagDB) == "table" then
+                for k, v in pairs(GridBagDB) do AquiferDB[k] = v end
             end
         end
-        DB = WaterysSatchelDB
+        DB = AquiferDB
         if type(DB.minimap) ~= "table" then DB.minimap = {} end
         for k, v in pairs(MM_DEFAULT) do if DB.minimap[k] == nil then DB.minimap[k] = v end end
         for k, v in pairs(DEFAULTS) do if DB[k] == nil then DB[k] = v end end
         GB.DB = DB
     elseif e == "PLAYER_LOGIN" then
-        DB = WaterysSatchelDB or DB
+        DB = AquiferDB or DB
         build(); buildMinimap(); buildSettings(); hookAll()
         GB.Layout()
     elseif e == "PLAYER_REGEN_DISABLED" then
