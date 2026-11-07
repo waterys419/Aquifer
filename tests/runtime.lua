@@ -704,7 +704,7 @@ do
   C_Container.PickupContainerItem=function() held=nil end
   ClearCursor=function() error('focus transfer must never clear the cursor') end
   -- Stock paging owns L2/R2; each stock window returns through the same cycle.
-  for _,name in ipairs({'BankFrame','MerchantFrame','TradeFrame','MailFrame','AuctionFrame','GuildBankFrame'}) do
+  for _,name in ipairs({'BankFrame','MerchantFrame','TradeFrame','MailFrame','CharacterFrame','AuctionFrame','GuildBankFrame'}) do
     local stock=frame('Frame',name);stock:Show()
     trusted=true;manager:FrameShown(stock);trusted=false
     GB.Open();assert(manager.focusedFrame==named.AquiferFrame and nav.attrs.focusowned==1)
@@ -712,6 +712,7 @@ do
     nav.attrs.focus=4;held='held-item'
     trusted=true;manager.gamepadBindings.PADLTRIGGER();trusted=false
     assert(manager.focusedFrame==stock and held=='held-item' and GB.IsOpen())
+    assert(GB.FocusLabel():find(({BankFrame='Bank',MerchantFrame='Vendor',TradeFrame='Trade',MailFrame='Mail',CharacterFrame='Character',AuctionFrame='Auction',GuildBankFrame='Guild bank'})[name],1,true))
     for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'unfocused Aquifer captured stock input') end
     GB.Refresh();GB.SetPad(true);SecureHandlerExecute(nav, "self:RunAttribute('rebind')");GB.UpdateFooter()
     assert(next(nav.bindings)==nil,'background refresh reclaimed input')
@@ -721,6 +722,28 @@ do
     GB.Close();assert(manager.focusedFrame==stock and held=='held-item')
     stock:Hide();trusted=true;manager:FrameHidden(stock);trusted=false
   end
+  -- Recover only our frame, preserve a moved item and never clear the cursor.
+  GB.Open();nav.attrs.focus=4
+  items['0:4']={iconFileID=77,itemID=777,hyperlink='[Selected]',stackCount=1}
+  GB.ControllerFocusLost()
+  items['0:6']=items['0:4'];items['0:4']=nil
+  GB.Layout();GB.ControllerFocusGained()
+  assert(nav.attrs.focus==6,'selected item not restored after movement')
+  manager.isUIFocused=false;GB.SyncControllerFocus()
+  assert(next(nav.bindings)==nil and GB.FocusLabel():find('World'))
+  named.AquiferRecover.scripts.OnClick()
+  assert(manager.focusedFrame==named.AquiferFrame and nav.attrs.focus==6 and held=='held-item')
+  -- Native combat state driver releases all owners before callbacks are deferred.
+  GB.itemMenu:Show();GB.itemMenu.bindings.PAD1={'example'}
+  combat=true;newstate='1';SecureHandlerExecute(nav,nav.attrs['_onstate-combat'])
+  assert(next(nav.bindings)==nil and next(GB.itemMenu.bindings)==nil and not GB.itemMenu.visible)
+  assert(nav.attrs.combatpaused==1 and GB.FocusLabel():find('Combat'))
+  GB.RecoverControllerFocus();assert(nav.attrs.combatpaused==1)
+  combat=false;newstate='0';SecureHandlerExecute(nav,nav.attrs['_onstate-combat']);newstate=nil
+  emit('PLAYER_REGEN_ENABLED')
+  assert(nav.bindings.PAD1 and nav.attrs.focus==6 and held=='held-item')
+  GB.Close();GB.Open();assert(nav.attrs.focus==6,'reopening reset the selection')
+  items['0:6']=nil
   -- Bind still relinquishes the registered panel and returns only on request.
   held=nil;items['0:1']={iconFileID=99,itemID=99,hyperlink='[Bind test]',stackCount=1}
   GB.Open();assert(GB.StartControllerBind(named.AquiferSlot1))
@@ -732,7 +755,7 @@ do
   GamepadMode=nil;SmartNavigationSecureHelper=nil
   nav:SetAttribute('focusowned',nil)
   else io.stdout:write('SKIP: exported stock focus-manager test (local UI export not present)\n') end
-  for _,name in ipairs({'BankFrame','MerchantFrame','TradeFrame','MailFrame','AuctionFrame','GuildBankFrame'}) do
+  for _,name in ipairs({'BankFrame','MerchantFrame','TradeFrame','MailFrame','CharacterFrame','AuctionFrame','GuildBankFrame'}) do
     if not _G[name] then frame('Frame',name) end
   end
   -- Native contextual X uses secure /use only while a compatible window is open.

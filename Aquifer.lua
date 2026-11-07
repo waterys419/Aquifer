@@ -82,6 +82,14 @@ local slots = {}
 local order, shownCount = {}, 0
 local pending = false
 local focusManager, pendingFocusRemoval
+local focusMark, focusNotice, focusRecoveryPending
+local function rememberSelection()
+    local b = nav and slots[nav:GetAttribute("focus") or 1]
+    if b and b.bag then
+        local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag,b.slot)
+        return {bag=b.bag, slot=b.slot, id=info and info.itemID, index=nav:GetAttribute("focus")}
+    end
+end
 local DB
 
 local function bagSize(bag)
@@ -253,7 +261,7 @@ end
 local NAV_REBIND = [[
 local nav = self
 nav:ClearBindings()
-if nav:GetAttribute("padnav") == 1 and nav:GetAttribute("bindinghandoff") ~= 1 and nav:GetAttribute("focusowned") ~= 0 then
+if nav:GetAttribute("combatpaused") ~= 1 and nav:GetAttribute("padnav") == 1 and nav:GetAttribute("bindinghandoff") ~= 1 and nav:GetAttribute("focusowned") ~= 0 then
   nav:SetBindingClick(true, "PADDUP", nav:GetFrameRef("up"), "LeftButton")
   nav:SetBindingClick(true, "PADDDOWN", nav:GetFrameRef("down"), "LeftButton")
   nav:SetBindingClick(true, "PADDLEFT", nav:GetFrameRef("left"), "LeftButton")
@@ -425,6 +433,7 @@ GB.NAV_SETUP, GB.NAV_MOVE, GB.NAV_REBIND = NAV_SETUP, NAV_MOVE, NAV_REBIND
 function GB.Layout()
     if inCombat() then pending = true; return end
     pending = false
+    local selected = focusMark or rememberSelection()
     order = GB.BuildOrder(currentSizes())
     if DB.collapsed then   -- collapsed: only slots that hold an item
         local keep = {}
@@ -448,6 +457,18 @@ function GB.Layout()
     local nb = GB.Neighbors(n, cols)
     for _, d in ipairs({ "left", "right", "up", "down" }) do
         for i = 1, n do nav:SetAttribute(d .. i, nb[d][i]) end
+    end
+    if selected then
+        local same, matching
+        for i=1,n do
+            local b=slots[i]
+            local info=C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag,b.slot)
+            if b.bag==selected.bag and b.slot==selected.slot then same=i end
+            if selected.id and info and info.itemID==selected.id then
+                if not matching or (b.bag==selected.bag and b.slot==selected.slot) then matching=i end
+            end
+        end
+        nav:SetAttribute("focus", matching or same or math.max(1,math.min(selected.index or 1,n)))
     end
     nav:SetAttribute("count", n)
     nav:SetAttribute("padnav", DB.padNav and 1 or 0)
@@ -524,8 +545,11 @@ function GB.MenuHints() return GB.HintText({ { "cross", "Select" }, { "circle", 
 -- Called often (cheap): re-draws the footer when the focus moves to an item / empty slot.
 function GB.UpdateFooter()
     if not (footer and frame and frame:IsShown() and nav) then return end
+    if GB.UpdateFocusNotice then GB.UpdateFocusNotice() end
+    if nav:GetAttribute("combatpaused") == 1 then footer:SetText("Controller paused during combat"); return end
     if nav:GetAttribute("focusowned") == 0 then
-        footer:SetText("L2 / R2: switch windows"); return
+        footer.shownKey=nil
+        footer:SetText("L2 / R2: return to Bags | Recover: button above"); return
     end
     local action = GB.InteractionAction and GB.InteractionAction()
     if not inCombat() and nav:GetAttribute("interaction") ~= action then GB.RefreshInteraction() end
@@ -596,6 +620,7 @@ local function restoreAfterBind()
     local reopen = bindWasOpen
     bindHandoff, bindWasOpen, bindReturnPending = false, false, false
     nav:SetAttribute("bindinghandoff", nil)
+    if focusNotice then focusNotice:Hide() end
     if reopen and DB.enabled then GB.Open() end
 end
 function GB.PollControllerBind() restoreAfterBind() end
@@ -621,12 +646,14 @@ function GB.StartControllerBind(b)
     SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
     SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
     SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
+    focusMark = rememberSelection()
     frame:Hide()
+    if focusNotice then focusNotice:Show(); GB.UpdateFocusNotice() end
     -- No stock method, click delegation, cursor pickup, focus change or preselection.
     -- Opening stock UI requires the next physical input, outside this addon callback.
     local bagKey = GetBindingKey and (GetBindingKey("OPENALLBAGS") or GetBindingKey("TOGGLEBACKPACK"))
     local hint = bagKey and ("Press your Bags key (" .. bagKey .. ")") or "Press your normal Bags button"
-    say2(hint .. "; select " .. (info.hyperlink or ("item " .. info.itemID)) .. " (bag " .. b.bag .. ", slot " .. b.slot .. "), then More Actions > Bind to Action Bar. Close stock bags, then /aq bindcancel to return.")
+    say2(hint .. "; select " .. (info.hyperlink or ("item " .. info.itemID)) .. " (bag " .. b.bag .. ", slot " .. b.slot .. "), then More Actions > Bind to Action Bar. Close stock bags, then click Return to Bags on the Aquifer notice (or /aq bindcancel).")
     return true
 end
 local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
@@ -956,12 +983,15 @@ end
 function GB.ControllerFocusGained()
     if inCombat() or not frame:IsShown() or GB.IsBindingHandoff() then return end
     nav:SetAttribute("focusowned", 1)
+    GB.Layout()
+    focusMark=nil
     GB.RefreshInteraction()
     SecureHandlerExecute(nav, NAV_CLAMP)
     if footer then footer.shownKey = nil end
 end
 function GB.ControllerFocusLost()
     if inCombat() then return end
+    focusMark = focusMark or rememberSelection()
     nav:SetAttribute("focusowned", 0)
     SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
     SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
@@ -1021,13 +1051,76 @@ function GB.Open()
     if GB.CloseBank then GB.CloseBank() end
     GB.Layout()
     frame:Show()
-    SecureHandlerExecute(nav, NAV_SETUP)
+    SecureHandlerExecute(nav, NAV_CLAMP)
 end
 function GB.Close()
     if not frame or inCombat() then return end
     frame:Hide()
 end
 function GB.Toggle() if GB.IsOpen() then GB.Close() else GB.Open() end end
+
+-- Read the manager's public state; never change stock frame fields or focus methods.
+function GB.FocusLabel()
+    if bindHandoff then return stockBindUIShown() and "Stock binding: close stock bags first" or "Binding finished? Return to Bags" end
+    if inCombat() then return "Combat: controller paused" end
+    local m=focusManager
+    if m and m.isUIFocused == false then return "World controls: L2/R2 or Recover Bags" end
+    local active=m and m.focusedFrame
+    if active and active~=frame then
+        for _,pair in ipairs({{"BankFrame","Bank"},{"MerchantFrame","Vendor"},{"MailFrame","Mail"},
+            {"TradeFrame","Trade"},{"CharacterFrame","Character"},{"AuctionFrame","Auction"},{"GuildBankFrame","Guild bank"}}) do
+            if active==_G[pair[1]] then return "Controls: "..pair[2].." | L2/R2: windows" end
+        end
+        return "Controls: other window | L2/R2: windows"
+    end
+    if GB.itemMenu and GB.itemMenu:IsShown() then return "Controls: Item menu | Circle: back to Bags" end
+    if GB.bagMenu and GB.bagMenu:IsShown() then return "Controls: Bag menu | Circle: back to Bags" end
+    if nav and nav:GetAttribute("focusowned")==0 then return "Controls: stock window | L2/R2: Bags" end
+    if DB and not DB.padNav then return "Bags: controller navigation off" end
+    return "Controls: Bags | Yellow box = selected slot"
+end
+function GB.UpdateFocusNotice()
+    if focusNotice then
+        focusNotice.label:SetText(GB.FocusLabel())
+        focusNotice.button:SetText(bindHandoff and "Return to Bags" or "Recover Bags")
+    end
+end
+function GB.SyncControllerFocus()
+    if inCombat() or not nav or not frame:IsShown() or bindHandoff then return end
+    local m=focusManager
+    if m and m.isUIFocused~=nil then
+        local owned=m.isUIFocused and m.focusedFrame==frame
+        if owned and nav:GetAttribute("focusowned")==0 then GB.ControllerFocusGained()
+        elseif not owned and nav:GetAttribute("focusowned")~=0 then GB.ControllerFocusLost() end
+    elseif nav:GetAttribute("focusowned")==0 then GB.ControllerFocusGained() end
+end
+function GB.RecoverControllerFocus()
+    if bindHandoff then GB.CancelControllerBind(); return end
+    if inCombat() then focusRecoveryPending=true; say2("Bags recovery will wait until combat ends."); return end
+    if not frame or not DB.enabled then return end
+    focusMark=focusMark or rememberSelection()
+    SecureHandlerExecute(GB.itemMenu,MENU_HIDE_ALL)
+    SecureHandlerExecute(GB.bagMenu,MENU_HIDE_ALL)
+    GB.UnregisterControllerFocus()
+    GB.Open()
+    GB.RegisterControllerFocus()
+    GB.SyncControllerFocus()
+    GB.UpdateFooter()
+end
+function GB.BuildFocusNotice()
+    focusNotice=CreateFrame("Frame","AquiferFocusNotice",UIParent,"BackdropTemplate")
+    focusNotice:SetSize(410,54)
+    focusNotice:SetPoint("BOTTOMLEFT",frame,"TOPLEFT",0,4)
+    focusNotice:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"})
+    focusNotice:SetBackdropColor(.03,.05,.08,.95)
+    focusNotice.label=focusNotice:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    focusNotice.label:SetPoint("TOPLEFT",8,-7)
+    local b=CreateFrame("Button","AquiferRecover",focusNotice,"UIPanelButtonTemplate")
+    b:SetSize(140,22);b:SetPoint("BOTTOMLEFT",8,5);b:SetText("Recover Bags")
+    b:SetScript("OnClick",GB.RecoverControllerFocus)
+    focusNotice.button=b
+    focusNotice:Hide()
+end
 
 local function build()
     -- Secure template on purpose: restricted snippets (Circle = CLOSE_BAG) may only Hide a protected frame.
@@ -1075,6 +1168,8 @@ local function build()
     hl:Hide()
     SetRef(nav, "hl", hl)
     buildMenu(frame)
+    SetRef(nav,"itemmenu",GB.itemMenu)
+    SetRef(nav,"bagmenu",GB.bagMenu)
     buildContextAction()
     for _, d in ipairs({ "up", "down", "left", "right" }) do
         local btn = CreateFrame("Button", "AquiferPad" .. d, frame, "SecureHandlerClickTemplate")
@@ -1086,18 +1181,33 @@ local function build()
         btn:RegisterForClicks("AnyUp")
         SetRef(nav, d, btn)
     end
+    GB.BuildFocusNotice()
     local acc = 0
     frame:SetScript("OnUpdate", function(_, dt)
         acc = acc + (dt or 0)
-        if acc > 0.1 then acc = 0; GB.UpdateFooter() end
+        if acc > 0.1 then acc = 0; GB.SyncControllerFocus(); GB.UpdateFooter() end
     end)
+    nav:SetAttribute("_onstate-combat", [[
+        if newstate == "1" then
+            self:SetAttribute("combatpaused",1)
+            self:SetAttribute("focusowned",0)
+            self:ClearBindings()
+            self:GetFrameRef("hl"):Hide()
+            local im=self:GetFrameRef("itemmenu")
+            local bm=self:GetFrameRef("bagmenu")
+            if im then im:ClearBindings(); im:Hide() end
+            if bm then bm:ClearBindings(); bm:Hide() end
+        else self:SetAttribute("combatpaused",nil) end
+    ]])
+    RegisterStateDriver(nav,"combat","[combat] 1; 0")
     frame.FocusGamepad = GB.ControllerFocusGained
     frame.UnfocusGamepad = GB.ControllerFocusLost
     frame:SetScript("OnShow", function()
-        footer.shownKey = nil; GB.Refresh(); GB.RefreshInteraction(); GB.RegisterControllerFocus(); GB.UpdateFooter()
+        focusNotice:Show(); footer.shownKey = nil; GB.Refresh(); GB.RefreshInteraction(); GB.RegisterControllerFocus(); GB.UpdateFooter()
     end)
     frame:SetScript("OnHide", function()
         GB.UnregisterControllerFocus()
+        if focusNotice and not bindHandoff then focusNotice:Hide() end
         if search then search:ClearFocus() end
         if not inCombat() then
             SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
@@ -1291,6 +1401,7 @@ local function slash(msg)
     local cmd, arg = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = cmd:lower()
     if cmd == "bank" then GB.OpenBank()
+    elseif cmd == "recover" then GB.RecoverControllerFocus()
     elseif cmd == "bindcancel" then GB.CancelControllerBind()
     elseif cmd == "" or cmd == "help" then
         say("/aquifer toggle - open or close the bag (also /aq)")
@@ -1373,6 +1484,7 @@ SlashCmdList.AQUIFER = slash
 local ev = CreateFrame("Frame", "AquiferEvents")
 local bindPollElapsed = 0
 ev:SetScript("OnUpdate", function(_, elapsed)
+    if bindHandoff and GB.UpdateFocusNotice then GB.UpdateFocusNotice() end
     if not bindHandoff then return end
     bindPollElapsed = bindPollElapsed + (elapsed or 0)
     if bindPollElapsed >= 0.1 then bindPollElapsed = 0; GB.PollControllerBind() end
@@ -1415,7 +1527,8 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
         if pendingFocusRemoval then GB.UnregisterControllerFocus() end
         if frame and frame:IsShown() then GB.RegisterControllerFocus(); GB.RefreshInteraction() end
         if frame and pending then GB.Layout() end
-        if frame and frame:IsShown() then GB.Refresh() end
+        if frame and frame:IsShown() then GB.Refresh(); GB.SyncControllerFocus() end
+        if focusRecoveryPending then focusRecoveryPending=nil; GB.RecoverControllerFocus() end
     elseif frame and frame:IsShown() then
         if e == "BAG_UPDATE" and not inCombat() then
             -- bag sizes can change when a bag is swapped
