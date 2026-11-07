@@ -2,6 +2,8 @@
 
 One grid bag for **WoW: Forever** (client folder `_forever_`). All your bags show in a single window, and you can move through it with a PlayStation or Xbox controller d-pad.
 
+![Aquifer bag window](screenshots/aquifer-bag.png)
+
 - All bags in one grid, with a water-blue look.
 - Controller d-pad moves one slot per press, in the direction you press.
 - Item menu and bag menu on the controller.
