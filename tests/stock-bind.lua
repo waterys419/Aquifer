@@ -43,3 +43,23 @@ for _,barOffset in ipairs({0,8,16,24}) do
 end
 assert(#placed==28 and exits==28)
 print('PASS: exported stock BindItem -> AttemptBindDown -> CaptureActionInput -> placement utility -> PlaceAction: 4 D-pad plus 24 L/R/both-modifier routes; reserved face slots unchanged')
+
+-- A held cursor item is NOT imported by this client's edit-mode entry point.
+-- Keep the real EnterEditMode/TransitionToSelectActionToPickup implementations.
+local cursorReads=0
+cursor=101
+env.GetCursorInfo=function() cursorReads=cursorReads+1;return 'item',cursor end
+env.GamepadMode={
+    FrameControlsManager={IsFrameSuspended=function() return false end,SuspendFrame=function() end},
+    SetOverrideAllowLeftRightModifiers=function() end,
+    RegisterInputModifierStateChangeCallback=function() end,
+}
+env.ShowUIPanel=function() end
+dialog.ActionTooltip={Hide=function() end}
+function dialog:ShowEditModeFrameAndBindings() end
+function dialog:StartListeningForButtons() end
+dialog.pickupFunc=nil;dialog.pickupParams=nil
+dialog:EnterEditMode()
+assert(dialog.activeMode=='SELECT_ACTION_TO_PICKUP' and not dialog.pickupFunc)
+assert(cursor==101 and cursorReads==0,'edit-mode entry unexpectedly imported the cursor item')
+print('PASS: exported EnterEditMode selects an existing action; it does not import a held cursor item')

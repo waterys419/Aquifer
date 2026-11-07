@@ -339,6 +339,7 @@ GB.ITEM_MENU, GB.BAG_MENU = ITEM_MENU, BAG_MENU
 local MENU_OPEN = [[
 if down then return end
 local nav = self:GetFrameRef("nav")
+if nav:GetAttribute("bindinghandoff") == 1 then return end
 local f = nav:GetAttribute("focus") or 1
 local s = nav:GetFrameRef("s" .. f)
 if not s then return end
@@ -384,6 +385,7 @@ h:ClearAllPoints(); h:SetPoint("TOPLEFT", e, "TOPLEFT", 0, 0); h:SetPoint("BOTTO
 local MENU_MOVE = [[
 if down then return end
 local m = self:GetFrameRef("menu")
+if m:GetFrameRef("nav"):GetAttribute("bindinghandoff") == 1 then return end
 local n = m:GetAttribute("count")
 local sel = m:GetAttribute("sel") or 1
 if self:GetAttribute("dir") == "up" then sel = sel - 1; if sel < 1 then sel = n end
@@ -555,12 +557,12 @@ function GB.OpenChatWith(link)
     if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
     say2(link)
 end
--- Native binding handoff. Only the client's secure click action opens a stock
--- bag button; the user then chooses Bind in Blizzard's own item menu. Never call
--- BindItem/EnterBindingMode/FrameControlsManager from addon Lua, even via securecall.
+-- Native binding handoff: release input, then let the PLAYER open Blizzard bags.
+-- Never delegate a stock bag click or call BindItem/EnterBindingMode/focus methods.
+-- Keep replacement suspended until an explicit return, including transient hides.
 local DEFAULT_FRAMES = { "ContainerFrameCombinedBags" }
 for i = 1, 13 do DEFAULT_FRAMES[#DEFAULT_FRAMES + 1] = "ContainerFrame" .. i end
-local bindHandoff, bindWasOpen, bindSeenStock = false, false, false
+local bindHandoff, bindWasOpen, bindReturnPending = false, false, false
 local function stockBindUIShown()
     local edit = _G.GamepadActionBarEditFrame
     if edit and edit.IsShown and edit:IsShown() then return true end
@@ -571,11 +573,10 @@ local function stockBindUIShown()
     return false
 end
 local function restoreAfterBind()
-    if not bindHandoff then return end
-    if stockBindUIShown() then bindSeenStock = true; return end
-    if not bindSeenStock or inCombat() then return end
+    if not bindHandoff or not bindReturnPending then return end
+    if stockBindUIShown() or inCombat() then return end
     local reopen = bindWasOpen
-    bindHandoff, bindWasOpen, bindSeenStock = false, false, false
+    bindHandoff, bindWasOpen, bindReturnPending = false, false, false
     nav:SetAttribute("bindinghandoff", nil)
     if reopen and DB.enabled then GB.Open() end
 end
@@ -583,41 +584,31 @@ function GB.PollControllerBind() restoreAfterBind() end
 function GB.CancelControllerBind()
     if not bindHandoff then return end
     if stockBindUIShown() then say2("Close Blizzard's bags and binding dialog first."); return end
-    bindSeenStock = true
+    bindReturnPending = true
+    if inCombat() then say2("Aquifer will return after combat.") end
     restoreAfterBind()
 end
-function GB.StartControllerBind(b, clickButton)
-    if inCombat() then return false end
-    if clickButton then
-        clickButton:SetAttribute("type", nil)
-        clickButton:SetAttribute("clickbutton", nil)
-    end
-    if bindHandoff or not (frame and nav and b and b.bag and b.slot) then return false end
+function GB.StartControllerBind(b)
+    -- Idempotent: duplicate mouse/controller callbacks cannot toggle a stock bag,
+    -- print a second prompt, or restart the session.
+    if bindHandoff or inCombat() or not (frame and nav and b and b.bag and b.slot) then return false end
     if CursorHasItem and CursorHasItem() then say2("Clear the item from your cursor before binding."); return false end
     local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag, b.slot)
     if not (info and info.itemID) then return false end
     local edit = _G.GamepadActionBarEditFrame
     if edit and edit.IsShown and edit:IsShown() then return false end
-    local nativeBagShown = stockBindUIShown()
-    local bagButtonName = b.bag == 0 and "MainMenuBarBackpackButton" or ("CharacterBag" .. (b.bag - 1) .. "Slot")
-    local nativeBagButton = _G[bagButtonName]
     DB.bindBlocked = nil
-    bindHandoff, bindWasOpen, bindSeenStock = true, frame:IsShown(), nativeBagShown
+    bindHandoff, bindWasOpen, bindReturnPending = true, frame:IsShown(), false
     nav:SetAttribute("bindinghandoff", 1)
     SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
     SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
     SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
     frame:Hide()
-    -- Attribute writes configure OUR secure action button. The engine calls the
-    -- untouched Blizzard bag button on this hardware click, after PreClick returns.
-    if clickButton and nativeBagButton and not nativeBagShown then
-        clickButton:SetAttribute("clickbutton", nativeBagButton)
-        clickButton:SetAttribute("type", "click")
-    end
-    say2("Blizzard bag: select " .. (info.hyperlink or ("item " .. info.itemID)) .. ", then More Actions > Bind to Action Bar. Close Blizzard's bags to return.")
-    if not (nativeBagShown or (clickButton and nativeBagButton)) then
-        say2("Press your normal Bags button first. /aquifer bindcancel cancels this handoff.")
-    end
+    -- No stock method, click delegation, cursor pickup, focus change or preselection.
+    -- Opening stock UI requires the next physical input, outside this addon callback.
+    local bagKey = GetBindingKey and (GetBindingKey("OPENALLBAGS") or GetBindingKey("TOGGLEBACKPACK"))
+    local hint = bagKey and ("Press your Bags key (" .. bagKey .. ")") or "Press your normal Bags button"
+    say2(hint .. "; select " .. (info.hyperlink or ("item " .. info.itemID)) .. " (bag " .. b.bag .. ", slot " .. b.slot .. "), then More Actions > Bind to Action Bar. Close stock bags, then /aq bindcancel to return.")
     return true
 end
 local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
@@ -798,11 +789,9 @@ local function newMenu(kind, defs, parent)
         e.label:SetText(def.label)
         e.def = def
         if stockBind then
+            -- A single up-only PostClick prepares handoff. No PreClick, secure
+            -- clickbutton delegation, or second MenuActions.bind invocation.
             e:SetAttribute("useOnKeyDown", false)
-            e:SetScript("PreClick", function(self, button, down)
-                if button ~= "LeftButton" or down or inCombat() then return end
-                GB.StartControllerBind(menuSlot(), self)
-            end)
         elseif secureAction then
             e:SetAttribute("type", "macro")
             e:SetAttribute("useOnKeyDown", false)
@@ -812,15 +801,10 @@ local function newMenu(kind, defs, parent)
             SetRef(e, "menu", m)
             e:SetAttribute("_onclick", MENU_CLOSE)
         end
-        e:SetScript("PostClick", function()
+        e:SetScript("PostClick", function(self, button, down)
             if stockBind then
-                if not inCombat() then
-                    e:SetAttribute("type", nil)
-                    e:SetAttribute("clickbutton", nil)
-                end
-                GB.PollControllerBind()
-                if bindHandoff and not stockBindUIShown() then
-                    say2("If the Blizzard bag did not open, press your normal Bags button. /aquifer bindcancel returns to Aquifer.")
+                if button == "LeftButton" and not down and not inCombat() then
+                    GB.StartControllerBind(menuSlot())
                 end
                 return
             end
@@ -1189,7 +1173,8 @@ local function slash(msg)
     elseif cmd == "" or cmd == "help" then
         say("/aquifer toggle - open or close the bag (also /aq)")
         say("/aquifer settings - settings window")
-        say("/aquifer bindcancel - cancel a pending native-bag handoff (close stock bags first)")
+        say("Bind: press your normal Bags button, choose the item, then More Actions > Bind to Action Bar; /aq bindcancel returns here.")
+        say("/aq bindcancel - return from Bind after closing Blizzard bags and dialog")
         say("/aquifer minimap on|off - minimap icon")
         say("/aquifer search word - grey out other items")
         say("/aquifer cols 8 - slots per row (4 to 20)")

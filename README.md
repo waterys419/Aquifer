@@ -72,14 +72,14 @@ Author: Audrey
 
 ## Bind an item to a controller action bar
 
-1. After updating, type `/reload` to clear the previous version's tainted session.
-2. Choose **Bind** in Aquifer's item menu outside combat. Aquifer closes, releases all its keys, and a secure click opens that item's normal Blizzard bag. If it does not open, press your normal Bags button.
-3. In the Blizzard bag, select the item again, then **More Actions → Bind to Action Bar**. Blizzard starts the binding dialog from its own controller input; Aquifer does not call its binding or focus methods.
-4. Select the desired action bar with your normal left/right modifiers, then press the D-pad or a face button. The stock unmodified face slots for Interact/Back and similar controls remain reserved.
-5. Finish or cancel binding, then close the Blizzard bags. Aquifer returns after all stock bag/binding windows are closed (and after combat if necessary).
+1. **Restart the game completely** after installing Aquifer (the renamed folder needs a restart).
+2. Outside combat, choose **Bind** in Aquifer's item menu. Aquifer closes and releases all its controller keys. It prints one hint with the item and its bag/slot.
+3. **Press your normal Bags button yourself** (the hint shows the configured Bags key when available). Aquifer will leave Blizzard's bag open. Select the named item, then **More Actions → Bind to Action Bar**.
+4. Select the desired action bar with your normal left/right modifiers, then press the D-pad or a face button. Test left, right and both modifiers. Blizzard's unmodified face slots for Interact/Back remain reserved.
+5. Finish or cancel binding. Close Blizzard's bags and dialog, then type **`/aq bindcancel`** to return to Aquifer. If in combat, the return waits until combat ends.
 
-If the handoff is waiting but no Blizzard window opened, `/aquifer bindcancel` returns to Aquifer. It does not force-close Blizzard windows. `/aquifer probe` records any protected call named by the game during the handoff.
+Bind is a manual handoff, not a direct dialog opener. It never clicks a stock button or calls a stock binding/focus method. Duplicate clicks do nothing. Temporary stock-window hides, repeated bag toggles and roster/bag events do not end handoff. This prevents Aquifer from hiding/replacing stock bags or reclaiming the face/shoulder keys during binding. It remains suspended until you explicitly return, even if you never opened a stock bag. No focus preselection is attempted.
 
-Stock bag replacement now hides the normal bags through secure frame-handle operations, avoiding addon-driven focus callbacks. No Blizzard mixin methods, global functions or binding tables are replaced. Permanent controller bindings are unchanged.
+The exported client's `EnterEditMode` enters `SELECT_ACTION_TO_PICKUP`; it does not import a held cursor item. Therefore this version does not pick up the item or promise an unsupported cursor-to-edit shortcut. The supported stock item menu starts Bind from the player's own input. `/aquifer probe` records protected-call errors during handoff.
 
-Offline checks: `lua5.1 tests/runtime.lua`; with Audrey's read-only UI export available, run `lua5.1 tests/stock-bind.lua` and `lua5.1 tests/stock-focus.lua`. They cover handoff, key release, trusted stock-button delegation, stock dispatcher routes and the callback chain reported by the probe. They do not emulate the native taint engine or physical controller input; the in-game steps above remain required before release.
+Offline checks: `lua5.1 tests/runtime.lua`, `lua5.1 tests/stock-bind.lua`, `lua5.1 tests/stock-focus.lua` (the last two read Audrey's UI export). They test duplicate callbacks, brief stock-window closures, hook suppression, all override owners, explicit return/combat deferral, stock routing and the reported restricted callback. They cannot prove native taint behavior or physical controller input. Confirm in game that the bags stay open, no popup appears, and face/shoulder combinations work before public release.

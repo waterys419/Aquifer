@@ -352,15 +352,15 @@ nav.attrs.focus=2; padclick('PAD4')
 assert(im.visible and not bm.visible and visibleEntries()=='equip,bind,link,destroy',visibleEntries())
 local eqb=named.AquiferMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
 im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macroLog[1]=='/use 0 2' and not im.visible)
--- Bind handoff round 2: only a secure action delegates to the stock BAG button.
--- All stock focus/bind methods must remain unreachable from addon Lua.
+-- Bind handoff round 3: only the PLAYER opens stock bags. No addon-driven
+-- stock click, focus, or BindItem calls; transient hides never end the session.
 do
   local ownerFrame=named.AquiferFrame
   local bindButton=named.AquiferMenu_item_bind
-  local opens, placements, iconRefreshes=0,0,0
+  local iconRefreshes=0
   local stock={shown=false}
   function stock:IsShown() return self.shown end
-  stock.BindItem=function() error('addon must never call BindItem, even through securecall') end
+  stock.BindItem=function() error('addon must never call BindItem') end
   stock.HookScript=function() error('must not hook stock bind scripts') end
   GamepadActionBarEditFrame=stock
   securecallfunction=function() error('securecall is not an insecure-to-secure bridge') end
@@ -371,71 +371,87 @@ do
   end
   local oldHide=ContainerFrame1.scripts.OnHide
   ContainerFrame1.scripts.OnHide=preferredTarget
-  -- Replacement must close stock bags through a secure frame operation, not addon :Hide().
   ContainerFrame1:Show();assert(not ContainerFrame1.visible and iconRefreshes>0)
-  local native=frame('Button','MainMenuBarBackpackButton')
-  function native:Click()
-    assert(secure,'stock button was called from addon Lua')
-    assert(not ownerFrame.visible and not im.visible and not bm.visible)
-    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'still captures input') end
-    opens=opens+1;preferredTarget();OpenAllBags()
+  for _,name in ipairs({'MainMenuBarBackpackButton','CharacterBag1Slot'}) do
+    local native=frame('Button',name)
+    native.Click=function() error('addon must not delegate a stock bag click') end
   end
-  local otherBag=frame('Button','CharacterBag1Slot');otherBag.Click=native.Click
+  local originalPrint, originalBindingKey=print,GetBindingKey
+  local prompts={}
+  print=function(msg) prompts[#prompts+1]=msg end
+  GetBindingKey=function(action) if action=='OPENALLBAGS' then return 'B' end end
   nav.attrs.focus=1;padclick('PAD1')
   im.bindings.PAD1={bindButton,'LeftButton'}
   for _,owner in ipairs({nav,im,bm}) do
     owner.bindings.PADLSHOULDER={'old'};owner.bindings['PADLSHOULDER-PAD1']={'old'}
     owner.bindings['PADRSHOULDER-PAD4']={'old'}
   end
+  assert(not bindButton.scripts.PreClick,'Bind must have only one callback')
+  bindButton.scripts.PostClick(bindButton,'LeftButton',true)
+  bindButton.scripts.PostClick(bindButton,'RightButton',false)
+  assert(ownerFrame.visible and #prompts==0,'wrong click phase started handoff')
   padclick('PAD1')
-  assert(opens==1 and ContainerFrame1.visible and not ownerFrame.visible and not stock.shown)
-  assert(bindButton.attrs.type==nil and bindButton.attrs.clickbutton==nil,'delegation leaked to next click')
-  GB.Open();GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind');GB.PollControllerBind()
-  assert(not ownerFrame.visible and next(nav.bindings)==nil)
-  for _,key in ipairs({'PADDUP','PADDDOWN','PADDLEFT','PADDRIGHT','PAD1','PAD2','PAD3','PAD4',
-    'PADLSHOULDER','PADRSHOULDER','PADLTRIGGER','PADRTRIGGER','PADLSHOULDER-PAD1','PADRSHOULDER-PAD4'}) do
-    for _,owner in ipairs({nav,im,bm}) do assert(owner.bindings[key]==nil,key..' captured') end
+  assert(not ContainerFrame1.visible and not ownerFrame.visible and not stock.shown)
+  assert(bindButton.attrs.type==nil and bindButton.attrs.clickbutton==nil,'stock delegation remains')
+  assert(#prompts==1 and prompts[1]:find('Bags key %(B%)') and prompts[1]:find('bag 0, slot 1'))
+  local function released()
+    assert(not ownerFrame.visible and not im.visible and not bm.visible)
+    assert(nav.attrs.bindinghandoff==1)
+    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'still captures input') end
   end
-  -- Next physical input belongs to Blizzard: native bag menu opens native binding.
+  local function duplicateAndPoll()
+    bindButton.scripts.PostClick(bindButton,'LeftButton',false)
+    assert(not GB.StartControllerBind(named.AquiferSlot1))
+    for i=1,20 do named.AquiferEvents.scripts.OnUpdate(nil,.2) end
+    GB.Open();GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind')
+    -- Stale menu-open/move callbacks must not reinstall PAD1 after handoff.
+    click(named.AquiferMenuOpen_x,'up');click(named.AquiferMenuPad_itemdown,'up')
+    released()
+  end
+  duplicateAndPoll();assert(#prompts==1)
+  -- Player presses Bags; all replacement hooks must leave it open.
+  secure=true;OpenAllBags();secure=false
+  assert(ContainerFrame1.visible);duplicateAndPoll();assert(ContainerFrame1.visible and #prompts==1)
+  -- Reproduce the observed flash: hidden for several frames, duplicate callback,
+  -- then another stock bag shown. Never auto-restore or print a second hint.
+  secure=true;CloseAllBags();secure=false
+  duplicateAndPoll();assert(#prompts==1)
+  secure=true;ToggleAllBags();secure=false
+  assert(ContainerFrame1.visible);duplicateAndPoll();assert(ContainerFrame1.visible)
+  -- Only a new player input invokes the native bind/focus path.
   secure=true;preferredTarget();stock.shown=true;secure=false
-  GB.PollControllerBind();assert(not ownerFrame.visible)
   emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall');assert(not AquiferDB.bindBlocked)
   emit('ADDON_ACTION_FORBIDDEN','Aquifer','SetPreferredGamepadInteractTarget')
   assert(AquiferDB.bindBlocked.action=='SetPreferredGamepadInteractTarget')
-  stock.shown=false;GB.PollControllerBind();assert(not ownerFrame.visible,'stock bags still open')
-  GB.CancelControllerBind();assert(not ownerFrame.visible,'cancel must not force-close stock bags')
+  GB.CancelControllerBind();released();assert(stock.shown and ContainerFrame1.visible)
+  stock.shown=false;GB.PollControllerBind();released()
+  GB.CancelControllerBind();released();assert(ContainerFrame1.visible)
   secure=true;CloseAllBags();secure=false
-  combat=true;GB.PollControllerBind();assert(not ownerFrame.visible)
+  GB.PollControllerBind();released() -- explicit return is required, even now
+  combat=true;GB.CancelControllerBind();GB.PollControllerBind();released()
   combat=false;named.AquiferEvents.scripts.OnUpdate(nil,.2)
   assert(ownerFrame.visible and nav.bindings.PAD1 and not nav.attrs.bindinghandoff)
-  -- Correct native bag button, not always the backpack.
-  items['2:1']={itemID=999,hyperlink='otherbag'}
-  assert(GB.StartControllerBind({bag=2,slot=1},bindButton))
-  assert(bindButton.attrs.clickbutton==otherBag)
-  secure=true;otherBag:Click();secure=false;bindButton.scripts.PostClick()
-  secure=true;CloseAllBags();secure=false;GB.PollControllerBind()
-  -- Missing native button: manual stock-bag key; do not immediately reclaim input.
-  MainMenuBarBackpackButton=nil
-  assert(GB.StartControllerBind(named.AquiferSlot1,bindButton))
-  assert(bindButton.attrs.type==nil)
-  GB.PollControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
+  -- Unbound Bags key: plain fallback hint, no guessed controller chord.
+  GetBindingKey=nil
+  assert(GB.StartControllerBind(named.AquiferSlot1))
+  assert(prompts[#prompts]:find('Press your normal Bags button'))
   GB.Slash('bindcancel');assert(ownerFrame.visible and nav.bindings.PAD1)
-  -- Programmatic handoff does not invoke any native method or alter the cursor.
-  assert(GB.StartControllerBind(named.AquiferSlot1));GB.PollControllerBind()
-  assert(not ownerFrame.visible)
-  secure=true;OpenAllBags();secure=false;GB.PollControllerBind()
-  GB.SetEnabled(false);secure=true;CloseAllBags();secure=false;GB.PollControllerBind()
-  assert(not ownerFrame.visible and next(nav.bindings)==nil)
+  -- Disabled addon does not reopen on return; invalid starts are harmless.
+  assert(GB.StartControllerBind(named.AquiferSlot1));GB.SetEnabled(false)
+  GB.CancelControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
   GB.SetEnabled(true);GB.Open()
-  combat=true;assert(not GB.StartControllerBind(named.AquiferSlot1,bindButton));combat=false
+  combat=true;assert(not GB.StartControllerBind(named.AquiferSlot1));combat=false
   stock.shown=true;assert(not GB.StartControllerBind(named.AquiferSlot1));stock.shown=false
   items['0:1'].itemID=nil;assert(not GB.StartControllerBind(named.AquiferSlot1));items['0:1'].itemID=101
   CursorHasItem=function() return true end;assert(not GB.StartControllerBind(named.AquiferSlot1));CursorHasItem=nil
-  assert(iconRefreshes>=4)
+  assert(ownerFrame.visible and nav.bindings.PAD1)
+  -- Normal replacement is restored after explicit cancellation.
+  ContainerFrame1:Show();assert(not ContainerFrame1.visible)
+  print=originalPrint;GetBindingKey=originalBindingKey
   ContainerFrame1.scripts.OnHide=oldHide
   GamepadActionBarEditFrame=nil;GamepadMode=nil;securecallfunction=nil
 end
-io.stdout:write('PASS: native stock-bag secure click, no addon BindItem/focus/securecall calls, secure stock visibility, all overrides released, stock-only bind session, failure/combat restoration and diagnostics\n')
+io.stdout:write('PASS: player-opened native bag handoff; duplicate/phase guards; transient hide/reopen cannot restore replacement; all override owners released; no stock click/focus/bind calls; explicit return and combat deferral\n')
 
 local oldprint=print
 -- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
