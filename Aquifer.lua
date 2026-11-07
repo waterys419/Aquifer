@@ -6,7 +6,7 @@ _G.Aquifer = GB
 local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false }
 local MM_DEFAULT = { angle = 215, hide = false }
 -- Frame refs: the global SecureHandlerSetFrameRef works even when BackdropTemplate wipes the secure template's methods (WoW Forever crash at :SetFrameRef, Nov 6).
-local function SetRef(f, k, v) if SecureHandlerSetFrameRef then SecureHandlerSetFrameRef(f, k, v) else f:SetFrameRef(k, v) end end
+local function SetRef(f, k, v) SecureHandlerSetFrameRef(f, k, v) end
 local ICON = "Interface\\Icons\\INV_Misc_Bag_21"
 local SLOT, GAP, PAD, TOP, BOTTOM = 37, 4, 8, 32, 46   -- BOTTOM = money row + controller hint row
 local MAXSLOT = 200
@@ -926,7 +926,7 @@ function GB.RefreshInteraction()
     if not nav or inCombat() then return end
     nav:SetAttribute("interaction", GB.InteractionAction())
     if frame:IsShown() and not GB.itemMenu:IsShown() and not GB.bagMenu:IsShown() then
-        nav:RunAttribute("rebind")
+        SecureHandlerExecute(nav, "self:RunAttribute('rebind')")
     end
 end
 local function nativeFocusManager()

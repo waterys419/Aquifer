@@ -8,7 +8,7 @@ local function protected(f)
     if combat and f.protected and not secure then error('protected frame mutation in combat') end
 end
 local function frame(kind, name, parent, template)
-    local f = setmetatable({kind=kind,name=name,parent=parent,template=template or '',attrs={},scripts={},events={},refs={},visible=false,bindings={}}, {__index=function(t,k) if k=='SetFrameRef' and rawget(t,'noMethodSetFrameRef') then return nil end return M[k] end})
+    local f = setmetatable({kind=kind,name=name,parent=parent,template=template or '',attrs={},scripts={},events={},refs={},visible=false,bindings={}}, {__index=function(t,k) if k=='RunAttribute' and not secure then return nil end if k=='SetFrameRef' and rawget(t,'noMethodSetFrameRef') then return nil end return M[k] end})
     frames[#frames+1]=f
     if name then named[name]=f; _G[name]=f end
     -- Client rule: only a frame with a secure template is protected (not its parent, not its children).
@@ -70,7 +70,7 @@ local alt=false
 function IsAltKeyDown() return alt end
 function InCombatLockdown() return combat end
 function SecureHandlerExecute(f,snip,button,down,owner)
-    local fn=assert(loadstring(snip));setfenv(fn,setmetatable({self=f,button=button,down=down,owner=owner},{__index=_G}));secure=true;local ok,err=pcall(fn);secure=false;assert(ok,err)
+    local fn=assert(loadstring(snip));setfenv(fn,setmetatable({self=f,button=button,down=down,owner=owner},{__index=_G}));local previousSecure=secure;secure=true;local ok,err=pcall(fn);secure=previousSecure;assert(ok,err)
 end
 function SecureHandlerWrapScript(f,script,header,pre,post)
     assert(f.protected and header.template:find('SecureHandler'),'WrapScript needs protected frame + secure header')
@@ -121,6 +121,9 @@ emit('ADDON_LOADED','Aquifer')
 emit('PLAYER_LOGIN')
 local GB=Aquifer
 local N=GB.Neighbors
+assert(named.AquiferNav.RunAttribute==nil,'RunAttribute must be unavailable on insecure frame objects')
+assert(not pcall(function() named.AquiferNav:RunAttribute('rebind') end))
+
 
 -- 1. grid order: bag 0 slot 1 first, then bag 1, no skipping
 local o=GB.BuildOrder({[0]=2,3,n=2})
@@ -411,7 +414,7 @@ do
     bindButton.scripts.PostClick(bindButton,'LeftButton',false)
     assert(not GB.StartControllerBind(named.AquiferSlot1))
     for i=1,20 do named.AquiferEvents.scripts.OnUpdate(nil,.2) end
-    GB.Open();GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind')
+    GB.Open();GB.Refresh();GB.SetPad(true);SecureHandlerExecute(nav, "self:RunAttribute('rebind')")
     -- Stale menu-open/move callbacks must not reinstall PAD1 after handoff.
     click(named.AquiferMenuOpen_x,'up');click(named.AquiferMenuPad_itemdown,'up')
     released()
@@ -710,7 +713,7 @@ do
     trusted=true;manager.gamepadBindings.PADLTRIGGER();trusted=false
     assert(manager.focusedFrame==stock and held=='held-item' and GB.IsOpen())
     for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'unfocused Aquifer captured stock input') end
-    GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind');GB.UpdateFooter()
+    GB.Refresh();GB.SetPad(true);SecureHandlerExecute(nav, "self:RunAttribute('rebind')");GB.UpdateFooter()
     assert(next(nav.bindings)==nil,'background refresh reclaimed input')
     trusted=true;manager.gamepadBindings.PADRTRIGGER();trusted=false
     assert(manager.focusedFrame==named.AquiferFrame and nav.attrs.focus==4 and nav.bindings.PAD1)
@@ -752,6 +755,10 @@ do
     f:Hide();macroLog={};padclick('PAD1');assert(#macroLog==0)
     GB.RefreshInteraction()
   end
+  combat=true
+  local before=nav.attrs.interaction
+  GB.RefreshInteraction();assert(nav.attrs.interaction==before,'RefreshInteraction mutated protected attributes in combat')
+  combat=false
   MerchantFrame:Show();MerchantFrame.selectedTab=2;GB.RefreshInteraction();macroLog={};padclick('PAD1');assert(#macroLog==0)
   MerchantFrame.selectedTab=1;InRepairMode=function() return true end;GB.RefreshInteraction();padclick('PAD1');assert(#macroLog==0)
   InRepairMode=nil;MerchantFrame:Hide();GB.RefreshInteraction()
