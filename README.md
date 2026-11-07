@@ -10,6 +10,8 @@ One grid bag for **WoW: Forever** (client folder `_forever_`). All your bags sho
 - Search box: items that don't match are greyed out.
 - Shows free slots, your money, and item cooldowns.
 - Minimap button to open the bag and change settings.
+- Saved bank contents, including other characters on this account.
+- L2/R2 switches between the bag and open bank, vendor, trade, and other stock windows.
 
 ## Install
 
@@ -25,11 +27,26 @@ Labels are PlayStation first, Xbox in brackets.
 | Button | On an item | On an empty slot |
 |---|---|---|
 | **D-pad** | Move the yellow frame one slot | Move the yellow frame one slot |
-| **X** (A) / **Triangle** (Y) | Item menu: Use, Equip, Bind, Split, Share in Chat, Destroy (only what fits the item) | Bag menu: Cleanup, Sell Junk, Hide empty slots |
+| **X** (A) / **Triangle** (Y) | Item menu: Use, Equip, Bind, Split, Share in Chat, Destroy (only what fits the item) | Bag menu: Cleanup, Sell Junk, Hide empty slots, View bank |
 | **Square** (X) | Quick action: Equip if it is gear, otherwise Use (the footer shows which) | Nothing |
 | **Circle** (B) | Close the menu, then the bag | Close the menu, then the bag |
 
 Turn controller movement off with `/aq pad off` or the **Controller d-pad in bag** checkbox.
+
+### Move items between windows
+
+With Aquifer and another window open, **L2/R2** (LT/RT) moves focus left/right between them. Your held item stays on the cursor. The d-pad controls the window that has focus.
+
+In Aquifer, **X** (A) changes with the open window:
+
+| Open window | X (A) on an item |
+|---|---|
+| Vendor | Sell the item (not on the buyback tab or in repair mode) |
+| Bank | Move the item to the bank |
+| Trade | Add the item to the trade |
+| Mail, auction, guild bank | Pick up the item for manual placement |
+
+To choose a particular destination slot at a bank, vendor or trade window, use **Triangle → Pick up**, then **L2/R2** to the other window and **X** to place it. To bring an item back, pick it up in the stock window, switch to Aquifer, and press **X** on a bag slot. While holding an item, X places it rather than selling or using another item. Away from these windows, X still opens the normal item menu.
 
 ### Bind an item to an action bar
 
@@ -71,6 +88,7 @@ Every command works with `/aquifer` or the short `/aq`.
 | `/aq help` | List the commands in chat |
 | `/aq toggle` | Open or close the bag |
 | `/aq settings` | Open the settings window |
+| `/aq bank` or `/aqb` | Open or close saved Bank memory |
 | `/aq search word` | Grey out every item that doesn't match (empty text clears it) |
 | `/aq cols 8` | Slots per row (4 to 20, default 8) |
 | `/aq scale 1` | Window size (0.5 to 2, default 1) |
@@ -96,6 +114,20 @@ Open it with `/aq settings` or right-click the minimap button.
 
 - **Search:** type in the box at the top of the window. Items that don't match are greyed out. Press Escape to clear it.
 - **Money:** your gold, silver and copper show at the bottom of the window.
+
+## Bank memory
+
+Visit your bank once to save its contents. Aquifer remembers the main bank, your bank bags, and reagent storage when available. The saved view updates while the real bank is open.
+
+Open **Bank** anywhere with **`/aq bank`**, **`/aqb`**, or **Triangle on an empty bag slot → View bank**. This is a separate window. It shows the last saved items, free slots, and a **Snapshot** date and time.
+
+- Type in the search box to grey out items that do not match.
+- Hover an item, or select it with the d-pad, to see its tooltip.
+- The d-pad moves through the grid and onto the next page. The `<` and `>` buttons also change pages.
+- **Next character** cycles through banks you have saved on this account, with realm names shown.
+- **Circle** or the top-right **X** closes the window. **Alt + drag** moves it.
+
+Bank memory is **read only**: clicking an item cannot use, move, sell or trade it. It shows the last saved visit, not live contents while you are away. Opening it closes Aquifer's live bag; opening the live bag closes memory. Memory cannot open in combat and closes when combat starts.
 
 ## License
 

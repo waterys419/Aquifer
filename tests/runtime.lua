@@ -108,6 +108,14 @@ local msgs={}
 print=function(m) msgs[#msgs+1]=m end
 
 assert(loadfile(source))('Aquifer')
+local bankCharacter, bankRealm, bankTime = 'Audrey', 'Forever', 1700000000
+function UnitName() return bankCharacter end
+function GetRealmName() return bankRealm end
+function time() return bankTime end
+function date(fmt,t) return os.date(fmt,t) end
+function RegisterStateDriver(f,state,condition) f.stateDriver={state,condition} end
+BANK_CONTAINER=-1; NUM_BANKBAGSLOTS=7; REAGENTBANK_CONTAINER=-3
+assert(loadfile('Bank.lua'))('Aquifer')
 AquiferDB={columns=8}
 emit('ADDON_LOADED','Aquifer')
 emit('PLAYER_LOGIN')
@@ -305,7 +313,7 @@ assert(not named.AquiferSettings.protected and not named.AquiferMinimapButton.pr
 GB.Open()
 local im=named.AquiferMenu_item; local bm=named.AquiferMenu_bag
 local labels={}; for i,d in ipairs(GB.ITEM_MENU) do labels[d.key]=d.label end
-assert(#GB.ITEM_MENU==6 and labels.use=='Use' and labels.equip=='Equip' and labels.bind=='Bind' and labels.split=='Split' and labels.link=='Share in Chat' and labels.destroy=='Destroy')
+assert(#GB.ITEM_MENU==7 and labels.use=='Use' and labels.equip=='Equip' and labels.bind=='Bind' and labels.split=='Split' and labels.link=='Share in Chat' and labels.destroy=='Destroy')
 assert(GB.BAG_MENU[1].label=='Cleanup' and GB.BAG_MENU[2].label=='Sell Junk')
 -- which entries show for which item (pure)
 local eq={['sword']=true}; local spell={['potion']=true,['scroll']=true}; local class0={['potion']=true}
@@ -535,3 +543,223 @@ assert(not pcall(function() named.AquiferMenu_item:SetFrameRef('x',nav) end),'no
 GB.Close()
 items={}
 io.stdout:write('PASS: one-press-one-slot, minimap, search, money, migration, grid order, neighbors, secure d-pad snippet, open/close/default swap, combat safety, Alt-drag\n')
+
+-- Bank memory: fresh visits only, copied values, bank updates, saved characters,
+-- paged read-only grid, tooltip/search, controller ownership and combat closure.
+do
+  local bankEvents=named.AquiferBankEvents
+  local function tick() bankEvents.scripts.OnUpdate(bankEvents,.3) end
+  assert(not GB.CaptureBank(),'closed bank must not be read')
+  GB.Slash('bank')
+  local w=GB.BankWindow
+  assert(w.visible and w.title.text=='Bank' and w.visible==true)
+  assert(w.snapshot.text:find('No snapshot') and w.visible and w.first==1 and w.selectedIndex==1)
+  GB.CloseBank()
+  sizes[-1]=28;sizes[5]=16;sizes[6]=24;sizes[-3]=4
+  items['-1:1']={iconFileID=123,stackCount=7,quality=4,hyperlink='|Hitem:55|h[Blue Gem]|h',itemID=55}
+  items['5:2']={iconFileID=124,stackCount=1,quality=1,hyperlink='|Hitem:56|h[Cloth]|h',itemID=56}
+  items['-3:1']={iconFileID=125,stackCount=3,quality=1,hyperlink='[Dust]',itemID=57}
+  emit('BANKFRAME_OPENED')
+  local saved=GB.BankSnapshot()
+  assert(saved.name=='Audrey' and saved.realm=='Forever' and saved.taken==bankTime)
+  assert(saved.total==72 and saved.free==69 and #saved.slots==72)
+  assert(saved.slots[1].link:find('Blue Gem') and saved.slots[1].bag==-1 and saved.slots[1].slot==1)
+  assert(saved.slots[30].bag==5 and saved.slots[30].slot==2 and saved.slots[30].count==1)
+  items['-1:1'].stackCount=9
+  assert(saved.slots[1].count==7,'snapshot aliased live data')
+  bankTime=bankTime+1;emit('PLAYERBANKSLOTS_CHANGED',1)
+  assert(GB.BankSnapshot().slots[1].count==9,'bank event must capture before a quick close')
+  tick();local before=GB.BankSnapshot()
+  emit('BAG_UPDATE',0);tick();assert(GB.BankSnapshot()==before,'carried bags must not refresh snapshot')
+  items['5:2']=nil;emit('BAG_UPDATE',5);tick();assert(GB.BankSnapshot().free==70)
+  items['-3:1'].stackCount=8;emit('PLAYERREAGENTBANKSLOTS_CHANGED');tick()
+  assert(GB.BankSnapshot().slots[69].count==8)
+  -- Cached link arrives later.
+  items['-1:2']={iconFileID=126,itemID=58,stackCount=1,quality=1}
+  emit('PLAYERBANKSLOTS_CHANGED',2);tick()
+  items['-1:2'].hyperlink='[Late item]';emit('GET_ITEM_INFO_RECEIVED',58);tick()
+  assert(GB.BankSnapshot().slots[2].link=='[Late item]')
+  emit('BANKFRAME_CLOSED');local closed=GB.BankSnapshot()
+  items={};sizes[-1]=0;emit('PLAYERBANKSLOTS_CHANGED');emit('BAG_UPDATE',5);tick()
+  assert(GB.BankSnapshot()==closed,'closed bank overwrote remembered data')
+  emit('BANKFRAME_OPENED');tick();assert(GB.BankSnapshot()==closed,'unready bank erased old snapshot')
+  emit('BANKFRAME_CLOSED')
+  -- Different realms/characters never overwrite each other.
+  bankRealm='Other Realm';sizes[-1]=1;sizes[5]=0;sizes[6]=0;sizes[-3]=0
+  emit('BANKFRAME_OPENED');emit('BANKFRAME_CLOSED')
+  assert(GB.BankSnapshot().total==1 and GB.BankSnapshot('Forever/Audrey')==closed)
+  bankRealm='Forever';bankCharacter='Alt';emit('BANKFRAME_OPENED');emit('BANKFRAME_CLOSED')
+  assert(GB.BankSnapshot('Forever/Alt').total==1)
+  bankCharacter='Audrey'
+  -- Simulate loading saved settings: only copied plain tables are needed.
+  local function copy(t) if type(t)~='table' then return t end local out={} for k,v in pairs(t) do out[k]=copy(v) end return out end
+  GB.DB.bankMemory=copy(GB.DB.bankMemory)
+  assert(GB.BankSnapshot().slots[1].count==9)
+  local liveReads=C_Container.GetContainerItemInfo
+  C_Container.GetContainerItemInfo=function() error('memory view must not read live items') end
+  GB.Slash('bank');assert(w.visible and w.snapshot.text:find('Snapshot: ') and w.free.text:find('69 / 72'))
+  assert(w.visible and w.first==1 and w.selectedIndex==1 and w.width==340 and w.height==488)
+  assert(next(nav.bindings)==nil and w.bindings.PAD2 and w.bindings.PAD1[1]==named.AquiferBankNoAction and w.bindings.PAD3[1]==named.AquiferBankNoAction and w.bindings.PAD4[1]==named.AquiferBankNoAction)
+  local c1,c8,c9=named.AquiferBankSlot1,named.AquiferBankSlot8,named.AquiferBankSlot9
+  assert(c1.point[5]==c8.point[5] and c9.point[4]==c1.point[4] and c9.point[5]<c1.point[5])
+  assert(c1.icon.texture==123 and c1.count.text==9 and c1.border[1]==.6)
+  function GameTooltip:SetOwner(owner) self.owner=owner end
+  function GameTooltip:SetHyperlink(link) self.link=link end
+  c1.scripts.OnEnter(c1);assert(GameTooltip.link==closed.slots[1].link)
+  for _,c in ipairs({c1,c8,c9}) do
+    assert(not c.scripts.OnClick and not c.scripts.PostClick and not c.scripts.OnDragStart)
+    assert(not c.attrs.type and not c.attrs.type2 and not c.attrs.item and not c.attrs.item2)
+  end
+  w.search.text='gem';w.search.scripts.OnTextChanged(w.search)
+  assert(c1.alpha==1 and named.AquiferBankSlot2.alpha==.25)
+  w.search.text='';w.search.scripts.OnTextChanged(w.search)
+  local right=named.AquiferBank_right
+  right.scripts.PostClick(right,'LeftButton',true);assert(w.selectedIndex==1,'key down must not move')
+  right.scripts.PostClick(right,'LeftButton',false);assert(w.selectedIndex==2)
+  for i=1,63 do GB.BankMove('right') end
+  assert(w.selectedIndex==65 and w.first==65 and w.visible==true and named.AquiferBankSlot9.visible==false)
+  GB.BankPage(1);assert(w.first==1)
+  GB.CycleBankCharacter();assert(w.character.text=='Audrey - Other Realm')
+  GB.CycleBankCharacter();assert(w.character.text=='Alt - Forever')
+  GB.CycleBankCharacter();assert(w.character.text=='Audrey - Forever')
+  -- Circle clears its own overrides before hiding (secure path).
+  click(named.AquiferBank_close,'up');assert(not w.visible and next(w.bindings)==nil)
+  SlashCmdList.AQUIFERBANK();assert(w.visible)
+  -- Combat state driver closes safely, with no protected addon mutation.
+  combat=true
+  local fn=assert(loadstring(w.attrs['_onstate-combat']))
+  setfenv(fn,setmetatable({self=w,newstate='1'},{__index=_G}));secure=true;fn();secure=false
+  assert(not w.visible and next(w.bindings)==nil)
+  GB.OpenBank();assert(not w.visible);combat=false
+  C_Container.GetContainerItemInfo=liveReads
+  GB.OpenBank();GB.Open();assert(not w.visible and next(w.bindings)==nil and nav.bindings.PAD1)
+  -- Triangle bag menu opens Bank, with no stock bag call.
+  nav.attrs.focus=1;padclick('PAD4');assert(bm.visible)
+  bm.bindings.PAD1={named.AquiferMenu_bag_bank,'LeftButton'};padclick('PAD1')
+  assert(w.visible and not GB.IsOpen() and next(nav.bindings)==nil and next(bm.bindings)==nil)
+  GB.CloseBank()
+  -- Reagent bank absent/locked: no invented storage or invalid negative bag reads.
+  REAGENTBANK_CONTAINER=nil;assert(#GB.BankBagIDs()==8)
+  REAGENTBANK_CONTAINER=-3;IsReagentBankUnlocked=function() return false end;assert(#GB.BankBagIDs()==8)
+  IsReagentBankUnlocked=nil
+end
+io.stdout:write('PASS: per-realm/character bank snapshots, live updates/reagent/cache/closed-bank safety, saved load, read-only paged grid, search/tooltips/quality, controller and combat ownership\n')
+
+-- Execute the exported FrameControlsManager with the addon focus callbacks.
+-- Model the explicit stock SecureHelper boundary; this is not a native taint emulator.
+do
+  local stockRoot='/mnt/a/Games/World of Warcraft/_forever_/BlizzardInterfaceCode/Interface/AddOns/'
+  local stockAvailable=io.open(stockRoot..'Blizzard_GamepadSharedUtility/FrameControlsManager.lua','r')
+  if stockAvailable then
+  stockAvailable:close()
+  local trusted=false
+  local wrappedCalls=0
+  local nativeCalls=0
+  local helper={}
+  function helper:WrapFunction(fn)
+    return function(...)
+      local old=trusted;trusted=true;wrappedCalls=wrappedCalls+1
+      local results={fn(...)};trusted=old;return unpack(results)
+    end
+  end
+  function helper.SecureCallOptionalFunction(obj,key,...)
+    local fn=obj[key];if not fn then return false end
+    local old=trusted;trusted=false -- isolate addon callback from stock caller
+    local result=fn(...);trusted=old;return true,result
+  end
+  local function nativeOnly()
+    assert(trusted,'ADDON_ACTION_FORBIDDEN / SetPreferredGamepadInteractTarget()')
+    nativeCalls=nativeCalls+1
+  end
+  local mode={PopupHandler={visiblePopups={}},ResetModifiers=nativeOnly,
+    ActivateBindingGroup=nativeOnly,DeactivateBindingGroup=nativeOnly}
+  function mode.CreateBindingGroup()
+    return {AddFunctionBinding=function(self,key,fn) self[key]=fn end,BlockDpadAndFaceButtons=function() end}
+  end
+  local env=setmetatable({
+    import=function(name) assert(name=='Blizzard_GamepadSmartNavigation.SecureHelper');return helper end,
+    CreateAndInitFromMixin=function() return {} end,
+    InputUtil={IsGamepadUIEnabled=function() return true end},
+    InGlue=function() return false end,
+    GamepadMode=mode,
+    GamepadPopupHandler={Init=function() end},
+    EventRegistry={RegisterCallback=function() end,RegisterFrameEventAndCallback=function() end},
+    GetScaledCenter=function(f) return f==named.AquiferFrame and 100 or 0,0 end,
+    SmartNavigation={Hide=nativeOnly,ActivateBinding=nativeOnly,HandlePanelOpen=nativeOnly},
+    GAMEPAD_TRIGGER_LEFT='PADLTRIGGER',GAMEPAD_TRIGGER_RIGHT='PADRTRIGGER',
+    SpellCanTargetItem=function() return false end,
+  },{__index=_G})
+  local file=assert(loadfile(stockRoot..'Blizzard_GamepadSharedUtility/FrameControlsManager.lua'))
+  setfenv(file,env);file()
+  local manager=setmetatable({}, {__index=env.GamepadFrameControlsManagerMixin})
+  manager.RefreshFocus=nativeOnly;manager.RegisterForTransitions=function() end
+  mode.FrameControlsManager=manager
+  trusted=true;manager:Init();trusted=false
+  GB.Close();GamepadMode=mode;SmartNavigationSecureHelper={}
+  local held='held-item';CursorHasItem=function() return held~=nil end
+  local previousPickup=C_Container.PickupContainerItem
+  C_Container.PickupContainerItem=function() held=nil end
+  ClearCursor=function() error('focus transfer must never clear the cursor') end
+  -- Stock paging owns L2/R2; each stock window returns through the same cycle.
+  for _,name in ipairs({'BankFrame','MerchantFrame','TradeFrame','MailFrame','AuctionFrame','GuildBankFrame'}) do
+    local stock=frame('Frame',name);stock:Show()
+    trusted=true;manager:FrameShown(stock);trusted=false
+    GB.Open();assert(manager.focusedFrame==named.AquiferFrame and nav.attrs.focusowned==1)
+    assert(nav.bindings.PAD1 and not nav.bindings.PADLTRIGGER and not nav.bindings.PADRTRIGGER)
+    nav.attrs.focus=4;held='held-item'
+    trusted=true;manager.gamepadBindings.PADLTRIGGER();trusted=false
+    assert(manager.focusedFrame==stock and held=='held-item' and GB.IsOpen())
+    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'unfocused Aquifer captured stock input') end
+    GB.Refresh();GB.SetPad(true);nav:RunAttribute('rebind');GB.UpdateFooter()
+    assert(next(nav.bindings)==nil,'background refresh reclaimed input')
+    trusted=true;manager.gamepadBindings.PADRTRIGGER();trusted=false
+    assert(manager.focusedFrame==named.AquiferFrame and nav.attrs.focus==4 and nav.bindings.PAD1)
+    assert(held=='held-item')
+    GB.Close();assert(manager.focusedFrame==stock and held=='held-item')
+    stock:Hide();trusted=true;manager:FrameHidden(stock);trusted=false
+  end
+  -- Bind still relinquishes the registered panel and returns only on request.
+  held=nil;items['0:1']={iconFileID=99,itemID=99,hyperlink='[Bind test]',stackCount=1}
+  GB.Open();assert(GB.StartControllerBind(named.AquiferSlot1))
+  assert(not GB.IsOpen() and #manager.shownFrames==0 and next(nav.bindings)==nil)
+  GB.CancelControllerBind();assert(GB.IsOpen() and manager.focusedFrame==named.AquiferFrame)
+  GB.Close()
+  assert(wrappedCalls>=12 and nativeCalls>0 and not named.AquiferFrame.useCustomNavigation)
+  CursorHasItem=nil;ClearCursor=nil;C_Container.PickupContainerItem=previousPickup
+  GamepadMode=nil;SmartNavigationSecureHelper=nil
+  nav:SetAttribute('focusowned',nil)
+  else io.stdout:write('SKIP: exported stock focus-manager test (local UI export not present)\n') end
+  for _,name in ipairs({'BankFrame','MerchantFrame','TradeFrame','MailFrame','AuctionFrame','GuildBankFrame'}) do
+    if not _G[name] then frame('Frame',name) end
+  end
+  -- Native contextual X uses secure /use only while a compatible window is open.
+  items['0:1']={iconFileID=100,stackCount=2,quality=1,hyperlink='[Test item]',itemID=123}
+  GB.Open();nav.attrs.focus=1
+  local contexts={{'MerchantFrame','Sell'},{'BankFrame','Move to bank'},{'TradeFrame','Add to trade'}}
+  for _,pair in ipairs(contexts) do
+    local f=_G[pair[1]];f:Show();GB.Refresh();GB.RefreshInteraction()
+    assert(GB.InteractionAction()==pair[2] and nav.bindings.PAD1[1]==named.AquiferContextAction)
+    macroLog={};padclick('PAD1');assert(#macroLog==1 and macroLog[1]=='/use 0 1')
+    -- Held item always drops into the chosen bag slot, never sells/uses another item.
+    CursorHasItem=function() return true end;picked=nil;macroLog={}
+    padclick('PAD1');assert(picked and picked[1]==0 and picked[2]==1 and #macroLog==0)
+    CursorHasItem=nil
+    -- Triangle's explicit Pick up allows manual placement in a particular destination.
+    padclick('PAD4');assert(named.AquiferMenu_item_pickup.visible)
+    im.bindings.PAD1={named.AquiferMenu_item_pickup,'LeftButton'};picked=nil;padclick('PAD1')
+    assert(picked and picked[2]==1)
+    -- Closing before key release cannot turn a transfer into an accidental item use.
+    f:Hide();macroLog={};padclick('PAD1');assert(#macroLog==0)
+    GB.RefreshInteraction()
+  end
+  MerchantFrame:Show();MerchantFrame.selectedTab=2;GB.RefreshInteraction();macroLog={};padclick('PAD1');assert(#macroLog==0)
+  MerchantFrame.selectedTab=1;InRepairMode=function() return true end;GB.RefreshInteraction();padclick('PAD1');assert(#macroLog==0)
+  InRepairMode=nil;MerchantFrame:Hide();GB.RefreshInteraction()
+  assert(nav.bindings.PAD1[1]==named.AquiferMenuOpen_x,'ordinary item menu changed')
+  -- Replacement never hides an independently opened bank bag container.
+  function ContainerFrame1:GetID() return 5 end
+  ContainerFrame1:Show();assert(ContainerFrame1.visible)
+  ContainerFrame1:Hide();ContainerFrame1.GetID=nil
+  GB.Close()
+end
+io.stdout:write('PASS: exported stock L2/R2 focus cycle across bank/vendor/trade/mail/auction/guild bank; callback isolation model; cursor preserved; secure contextual X, held-item drop, pickup menu and buyback/repair guards\n')
