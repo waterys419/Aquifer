@@ -3,7 +3,7 @@ local addonName = ...
 local GB = {}
 _G.Aquifer = GB
 
-local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false }
+local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false, notice = false }
 local MM_DEFAULT = { angle = 215, hide = false }
 -- Frame refs: the global SecureHandlerSetFrameRef works even when BackdropTemplate wipes the secure template's methods (WoW Forever crash at :SetFrameRef, Nov 6).
 local function SetRef(f, k, v) SecureHandlerSetFrameRef(f, k, v) end
@@ -183,6 +183,14 @@ local function makeSlot(i)
     end)
     b:SetScript("OnEnter", function(self)
         if self.bag then
+            -- A hovered context item must also be the item the confirm key acts on.
+            if not inCombat() and GB.InteractionAction and GB.InteractionAction()
+                and nav and nav:GetAttribute("focusowned") ~= 0
+                and not GB.itemMenu:IsShown() and not GB.bagMenu:IsShown() then
+                nav:SetAttribute("focus",self.index)
+                SecureHandlerExecute(nav,GB.NAV_CLAMP)
+                GB.UpdateFooter()
+            end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             if GameTooltip.SetBagItem then GameTooltip:SetBagItem(self.bag, self.slot) end
             GameTooltip:Show()
@@ -549,7 +557,7 @@ function GB.UpdateFooter()
     if nav:GetAttribute("combatpaused") == 1 then footer:SetText("Controller paused during combat"); return end
     if nav:GetAttribute("focusowned") == 0 then
         footer.shownKey=nil
-        footer:SetText("L2 / R2: return to Bags | Recover: button above"); return
+        footer:SetText("L2 / R2: return to Bags"); return
     end
     local action = GB.InteractionAction and GB.InteractionAction()
     if not inCombat() and nav:GetAttribute("interaction") ~= action then GB.RefreshInteraction() end
@@ -558,11 +566,16 @@ function GB.UpdateFooter()
     if b and b.bag then icon, count, _, _, link = itemInfo(b.bag, b.slot) end
     local onItem = icon and true or false
     local quick = onItem and GB.QuickLabel(link, count) or nil
-    local hintAction = action and ((CursorHasItem and CursorHasItem()) and "Place" or action)
+    local hintAction = action and ((CursorHasItem and CursorHasItem()) and "Place" or (onItem and GB.ContextHint(b,action)))
     local key = (onItem and "i" or "e") .. tostring(quick) .. tostring(hintAction)
     if footer.shownKey ~= key then
         footer.shownKey = key
-        if action then footer:SetText(GB.HintText({ {"cross", hintAction}, {"triangle", "Item Menu"}, {"circle", "Close"} }) .. " | L2/R2: windows")
+        if action then
+            local hints={}
+            if hintAction then hints[#hints+1]={"cross",hintAction} end
+            hints[#hints+1]={"triangle",onItem and "Item Menu" or "Bag Menu"}
+            hints[#hints+1]={"circle","Close"}
+            footer:SetText(GB.HintText(hints) .. " | L2/R2: windows")
         else footer:SetText(GB.GridHints(onItem, quick)) end
     end
 end
@@ -648,12 +661,12 @@ function GB.StartControllerBind(b)
     SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
     focusMark = rememberSelection()
     frame:Hide()
-    if focusNotice then focusNotice:Show(); GB.UpdateFocusNotice() end
+    if focusNotice then GB.UpdateFocusNotice() end
     -- No stock method, click delegation, cursor pickup, focus change or preselection.
     -- Opening stock UI requires the next physical input, outside this addon callback.
     local bagKey = GetBindingKey and (GetBindingKey("OPENALLBAGS") or GetBindingKey("TOGGLEBACKPACK"))
     local hint = bagKey and ("Press your Bags key (" .. bagKey .. ")") or "Press your normal Bags button"
-    say2(hint .. "; select " .. (info.hyperlink or ("item " .. info.itemID)) .. " (bag " .. b.bag .. ", slot " .. b.slot .. "), then More Actions > Bind to Action Bar. Close stock bags, then click Return to Bags on the Aquifer notice (or /aq bindcancel).")
+    say2(hint .. "; select " .. (info.hyperlink or ("item " .. info.itemID)) .. " (bag " .. b.bag .. ", slot " .. b.slot .. "), then More Actions > Bind to Action Bar. Close stock bags, then type /aq bindcancel to return to Aquifer.")
     return true
 end
 local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
@@ -942,12 +955,28 @@ local function shown(name) local f = _G[name]; return f and f:IsShown() end
 function GB.InteractionAction()
     if shown("MerchantFrame") then
         if MerchantFrame.selectedTab == 2 or (CanSellItems and not CanSellItems()) or (InRepairMode and InRepairMode()) then return "Unavailable" end
-        return "Sell"
+        return "Sell item"
     end
-    if shown("BankFrame") then return "Move to bank" end
-    if shown("TradeFrame") then return "Add to trade" end
+    if shown("BankFrame") then return "Deposit" end
+    if shown("TradeFrame") then return "Trade" end
+    if shown("MailFrame") and shown("SendMailFrame") then return "Attach" end
     -- These windows still use stock L2/R2 focus; X holds/drops for manual placement.
     if shown("MailFrame") or shown("AuctionFrame") or shown("AuctionHouseFrame") or shown("GuildBankFrame") then return "Pick up" end
+end
+-- Use the same per-item price as the stock tooltip; an uncached price is unknown.
+function GB.ContextHint(slot,action)
+    if action=="Unavailable" then return nil end
+    if action~="Sell item" then return action end
+    if not slot or not slot.bag then return nil end
+    local info=C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(slot.bag,slot.slot)
+    if info and info.hasNoValue then return "Can't sell" end
+    local _,_,_,_,link=itemInfo(slot.bag,slot.slot)
+    local gi=itemAPI("GetItemInfo")
+    if not link or not gi then return nil end
+    local price=select(11,gi(link))
+    if issecretvalue and issecretvalue(price) then return nil end
+    if type(price)~="number" then return nil end
+    return price>0 and "Sell item" or "Can't sell"
 end
 function GB.RefreshInteraction()
     if not nav or inCombat() then return end
@@ -1013,7 +1042,7 @@ local function buildContextAction()
         local action = GB.InteractionAction()
         if not action then return end -- window closed since the key was bound; never accidentally use/equip
         if CursorHasItem and CursorHasItem() then self.pickupSlot = slot; return end
-        if action == "Unavailable" then return end
+        if action == "Unavailable" or GB.ContextHint(slot,action)=="Can't sell" then return end
         if action == "Pick up" then self.pickupSlot = slot; return end
         local icon = itemInfo(slot.bag, slot.slot)
         if not icon then return end
@@ -1061,10 +1090,10 @@ function GB.Toggle() if GB.IsOpen() then GB.Close() else GB.Open() end end
 
 -- Read the manager's public state; never change stock frame fields or focus methods.
 function GB.FocusLabel()
-    if bindHandoff then return stockBindUIShown() and "Stock binding: close stock bags first" or "Binding finished? Return to Bags" end
+    if bindHandoff then return stockBindUIShown() and "Stock binding: close stock bags first" or "Binding finished: /aq bindcancel" end
     if inCombat() then return "Combat: controller paused" end
     local m=focusManager
-    if m and m.isUIFocused == false then return "World controls: L2/R2 or Recover Bags" end
+    if m and m.isUIFocused == false then return "World controls: L2/R2 or /aq recover" end
     local active=m and m.focusedFrame
     if active and active~=frame then
         for _,pair in ipairs({{"BankFrame","Bank"},{"MerchantFrame","Vendor"},{"MailFrame","Mail"},
@@ -1082,7 +1111,7 @@ end
 function GB.UpdateFocusNotice()
     if focusNotice then
         focusNotice.label:SetText(GB.FocusLabel())
-        focusNotice.button:SetText(bindHandoff and "Return to Bags" or "Recover Bags")
+        if DB and DB.notice and (bindHandoff or (frame and frame:IsShown())) then focusNotice:Show() else focusNotice:Hide() end
     end
 end
 function GB.SyncControllerFocus()
@@ -1096,7 +1125,7 @@ function GB.SyncControllerFocus()
 end
 function GB.RecoverControllerFocus()
     if bindHandoff then GB.CancelControllerBind(); return end
-    if inCombat() then focusRecoveryPending=true; say2("Bags recovery will wait until combat ends."); return end
+    if inCombat() then focusRecoveryPending=true; return end
     if not frame or not DB.enabled then return end
     focusMark=focusMark or rememberSelection()
     SecureHandlerExecute(GB.itemMenu,MENU_HIDE_ALL)
@@ -1109,16 +1138,12 @@ function GB.RecoverControllerFocus()
 end
 function GB.BuildFocusNotice()
     focusNotice=CreateFrame("Frame","AquiferFocusNotice",UIParent,"BackdropTemplate")
-    focusNotice:SetSize(410,54)
+    focusNotice:SetSize(410,30)
     focusNotice:SetPoint("BOTTOMLEFT",frame,"TOPLEFT",0,4)
     focusNotice:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"})
     focusNotice:SetBackdropColor(.03,.05,.08,.95)
     focusNotice.label=focusNotice:CreateFontString(nil,"OVERLAY","GameFontNormal")
     focusNotice.label:SetPoint("TOPLEFT",8,-7)
-    local b=CreateFrame("Button","AquiferRecover",focusNotice,"UIPanelButtonTemplate")
-    b:SetSize(140,22);b:SetPoint("BOTTOMLEFT",8,5);b:SetText("Recover Bags")
-    b:SetScript("OnClick",GB.RecoverControllerFocus)
-    focusNotice.button=b
     focusNotice:Hide()
 end
 
@@ -1203,7 +1228,7 @@ local function build()
     frame.FocusGamepad = GB.ControllerFocusGained
     frame.UnfocusGamepad = GB.ControllerFocusLost
     frame:SetScript("OnShow", function()
-        focusNotice:Show(); footer.shownKey = nil; GB.Refresh(); GB.RefreshInteraction(); GB.RegisterControllerFocus(); GB.UpdateFooter()
+        GB.UpdateFocusNotice(); footer.shownKey = nil; GB.Refresh(); GB.RefreshInteraction(); GB.RegisterControllerFocus(); GB.UpdateFooter()
     end)
     frame:SetScript("OnHide", function()
         GB.UnregisterControllerFocus()
@@ -1402,12 +1427,16 @@ local function slash(msg)
     cmd = cmd:lower()
     if cmd == "bank" then GB.OpenBank()
     elseif cmd == "recover" then GB.RecoverControllerFocus()
+    elseif cmd == "notice" then
+        DB.notice=not DB.notice;GB.UpdateFocusNotice()
+        say("Focus notice "..(DB.notice and "on." or "off."))
     elseif cmd == "bindcancel" then GB.CancelControllerBind()
     elseif cmd == "" or cmd == "help" then
         say("/aquifer toggle - open or close the bag (also /aq)")
         say("/aquifer settings - settings window")
         say("/aq bank or /aqb - read-only bank memory (visit your bank to save it)")
         say("Bind: press your normal Bags button, choose the item, then More Actions > Bind to Action Bar; /aq bindcancel returns here.")
+        say("/aq recover - restore Bags controls; /aq notice - toggle the optional focus notice")
         say("/aq bindcancel - return from Bind after closing Blizzard bags and dialog")
         say("/aquifer minimap on|off - minimap icon")
         say("/aquifer search word - grey out other items")
@@ -1420,7 +1449,7 @@ local function slash(msg)
         say("/aquifer glyphs - show which button pictures were found; /aquifer glyph cross AtlasName sets one")
         say("/aquifer hide on|off - hide empty slots (also a tick box in settings and an entry in the Triangle bag menu)")
         say("/aquifer probe - list the client's bind / gamepad names (send to Claude)")
-        say("L2/R2: switch between Aquifer and open stock windows. X: sell at a vendor, move to bank, or add to trade. Triangle > Pick up: hold an item for manual placement.")
+        say("L2/R2: switch between Aquifer and open stock windows. Cross (Xbox A): Sell item, Deposit, Attach on Send Mail, or Trade, as shown below the grid. Triangle > Pick up: hold an item for manual placement.")
         say("/aquifer config - show settings")
         say("Alt + drag moves the window.")
     elseif cmd == "toggle" then GB.Toggle()

@@ -731,7 +731,7 @@ do
   assert(nav.attrs.focus==6,'selected item not restored after movement')
   manager.isUIFocused=false;GB.SyncControllerFocus()
   assert(next(nav.bindings)==nil and GB.FocusLabel():find('World'))
-  named.AquiferRecover.scripts.OnClick()
+  SlashCmdList.AQUIFER('recover')
   assert(manager.focusedFrame==named.AquiferFrame and nav.attrs.focus==6 and held=='held-item')
   -- Native combat state driver releases all owners before callbacks are deferred.
   GB.itemMenu:Show();GB.itemMenu.bindings.PAD1={'example'}
@@ -761,7 +761,7 @@ do
   -- Native contextual X uses secure /use only while a compatible window is open.
   items['0:1']={iconFileID=100,stackCount=2,quality=1,hyperlink='[Test item]',itemID=123}
   GB.Open();nav.attrs.focus=1
-  local contexts={{'MerchantFrame','Sell'},{'BankFrame','Move to bank'},{'TradeFrame','Add to trade'}}
+  local contexts={{'MerchantFrame','Sell item'},{'BankFrame','Deposit'},{'TradeFrame','Trade'}}
   for _,pair in ipairs(contexts) do
     local f=_G[pair[1]];f:Show();GB.Refresh();GB.RefreshInteraction()
     assert(GB.InteractionAction()==pair[2] and nav.bindings.PAD1[1]==named.AquiferContextAction)
@@ -793,3 +793,44 @@ do
   GB.Close()
 end
 io.stdout:write('PASS: exported stock L2/R2 focus cycle across bank/vendor/trade/mail/auction/guild bank; callback isolation model; cursor preserved; secure contextual X, held-item drop, pickup menu and buyback/repair guards\n')
+
+-- 2.2.1: quiet recovery, contextual footer, hover and sale-price guards.
+do
+  GB.Open();nav.attrs.focus=1;nav.attrs.focusowned=1
+  assert(AquiferDB.notice==false and not named.AquiferFocusNotice:IsShown())
+  assert(not named.AquiferRecover,'recovery button must not exist')
+  GB.Slash('notice');assert(named.AquiferFocusNotice:IsShown())
+  GB.Slash('notice');assert(not named.AquiferFocusNotice:IsShown())
+  local oldInfo=C_Item.GetItemInfo
+  local price=25
+  C_Item.GetItemInfo=function() return 'Test item',nil,nil,nil,nil,nil,nil,nil,nil,nil,price end
+  MerchantFrame:Show();GB.Refresh();GB.RefreshInteraction();GB.UpdateFooter()
+  assert(footerText():find('Sell item') and footerText():find('%[X%]'),tostring(footerText()))
+  price=0;GB.UpdateFooter();assert(footerText():find("Can't sell"))
+  macroLog={};padclick('PAD1');assert(#macroLog==0,'zero-price item sale attempted')
+  price=nil;GB.UpdateFooter();assert(not footerText():find('Sell item'),'uncached price claims sale')
+  price=25;items['0:1'].hasNoValue=true;GB.UpdateFooter();assert(footerText():find("Can't sell"))
+  items['0:1'].hasNoValue=nil
+  nav.attrs.focus=5;GB.UpdateFooter();assert(not footerText():find('Sell item'),'empty slot sale hint')
+  CursorHasItem=function() return true end;GB.UpdateFooter();assert(footerText():find('Place'));CursorHasItem=nil
+  named.AquiferSlot1.scripts.OnEnter(named.AquiferSlot1);assert(nav.attrs.focus==1,'hover did not select')
+  nav.attrs.focus=2;combat=true
+  named.AquiferSlot1.scripts.OnEnter(named.AquiferSlot1);assert(nav.attrs.focus==2,'combat hover changed focus')
+  combat=false;nav.attrs.focusowned=0
+  named.AquiferSlot1.scripts.OnEnter(named.AquiferSlot1);assert(nav.attrs.focus==2,'hover stole stock focus')
+  nav.attrs.focusowned=1;nav.attrs.focus=1;MerchantFrame:Hide()
+  for _,pair in ipairs({{'BankFrame','Deposit'},{'TradeFrame','Trade'}}) do
+    _G[pair[1]]:Show();GB.RefreshInteraction();GB.UpdateFooter();assert(footerText():find(pair[2]))
+    _G[pair[1]]:Hide()
+  end
+  if not SendMailFrame then frame('Frame','SendMailFrame') end
+  MailFrame:Show();SendMailFrame:Show();GB.RefreshInteraction();GB.UpdateFooter()
+  assert(footerText():find('Attach'))
+  macroLog={};padclick('PAD1');assert(#macroLog==1 and macroLog[1]=='/use 0 1')
+  SendMailFrame:Hide();GB.RefreshInteraction();GB.UpdateFooter()
+  assert(footerText():find('Pick up') and not footerText():find('Attach'))
+  MailFrame:Hide();C_Item.GetItemInfo=oldInfo
+  GB.Slash('recover');assert(not named.AquiferFocusNotice:IsShown())
+  GB.Close()
+end
+io.stdout:write('PASS: 2.2.1 quiet notice/recovery, contextual footer, sale-price guards, mail attach and safe hover selection\n')

@@ -42,9 +42,10 @@ In Aquifer, **X** (A) changes with the open window:
 | Open window | X (A) on an item |
 |---|---|
 | Vendor | Sell the item (not on the buyback tab or in repair mode) |
-| Bank | Move the item to the bank |
-| Trade | Add the item to the trade |
-| Mail, auction, guild bank | Pick up the item for manual placement |
+| Bank | Deposit |
+| Trade | Trade |
+| Send Mail | Attach |
+| Mail inbox, auction, guild bank | Pick up the item for manual placement |
 
 To choose a particular destination slot at a bank, vendor or trade window, use **Triangle → Pick up**, then **L2/R2** to the other window and **X** to place it. To bring an item back, pick it up in the stock window, switch to Aquifer, and press **X** on a bag slot. While holding an item, X places it rather than selling or using another item. Away from these windows, X still opens the normal item menu.
 
@@ -135,27 +136,27 @@ See [LICENSE](LICENSE).
 
 Author: Audrey
 
-## Window focus and recovery (2.2)
+## Window focus and recovery (2.2.1)
 
-The notice above the bag names the window receiving controller input: Bags, Bank,
-Vendor, Mail, Trade or Character. Item and bag menus show their own Back hint.
-Use the stock L2/R2 (LT/RT) controls to switch windows. Aquifer remembers its
+Use the stock **L2/R2** (LT/RT) controls to switch windows. Aquifer remembers its
 selected bag slot, follows the same item ID when it moves where possible, and
 clamps to a valid slot when that item disappears. Identical item stacks may select
 a matching stack. Stock windows keep their native selection rules.
 
-If you lose your place, use **Recover Bags** on the notice (mouse or controller
-cursor click), or `/aq recover`. This closes Aquifer's menus and restores its
-selection without clearing a held item. It does not close or modify stock windows.
-Recovery requested during combat waits until combat ends. Aquifer's d-pad and
+The existing footer shows **Cross / X on PlayStation, A on Xbox (PAD1)** for
+**Sell item**, **Deposit**, **Attach** or **Trade**, according to the open window.
+Hovering an item selects it while Aquifer owns the controls, outside combat.
+Items with no sell value show **Can't sell**; an unknown price hides the sale hint.
+
+The focus notice is hidden by default. `/aq notice` toggles it for debugging.
+There is no recovery button. Use `/aq recover` to close Aquifer's menus and restore
+its selection without clearing a held item or changing stock windows. Recovery
+requested during combat waits silently until combat ends. Aquifer's d-pad and
 face-button overrides pause during combat, then follow the current window again.
 
 After **Bind**, use your normal Bags button and complete the action in the stock
-bags. Close the stock bags and binding dialog, then click **Return to Bags** on
-the notice. This is an explicit return; it never presses Bind or reopens bags for
-you while the stock binding UI is active. `/aq bindcancel` still works.
+bags. Close the stock bags and binding dialog, then use `/aq bindcancel` to return.
+This never presses Bind or reopens bags while the stock binding UI is active.
 
-Test: select an item, switch to bank/vendor/mail/trade/character and back, then
-close/reopen Bags. Check the label, yellow selection and held item. Try Recover
-Bags, submenu Back, and Bind/Return. Native controller focus and taint still need
-an in-game check; the offline tests exercise the exported stock focus manager.
+Native controller focus and taint still need an in-game check; the offline tests
+exercise the exported stock focus manager and the contextual action guards.

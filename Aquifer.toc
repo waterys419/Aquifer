@@ -2,7 +2,7 @@
 ## Title: Aquifer
 ## Notes: One plain grid bag. Controller d-pad moves to the slot you see next to you.
 ## Author: Audrey
-## Version: 2.2.0
+## Version: 2.2.1
 ## SavedVariables: AquiferDB, WaterysSatchelDB, TidepoolDB, GridBagDB
 
 Aquifer.lua
