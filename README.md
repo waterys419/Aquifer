@@ -4,6 +4,8 @@ One grid bag for **WoW: Forever** (client folder `_forever_`). All your bags sho
 
 ![Aquifer bag window](screenshots/aquifer-bag.png)
 
+![Bind to action bar picker: choose the controller button to put an item on](screenshots/bind-picker.png)
+
 - All bags in one grid, with a water-blue look.
 - Controller d-pad moves one slot per press, in the direction you press.
 - Item menu and bag menu on the controller.
