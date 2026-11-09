@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.2
+
+- Show the native item tooltip for the controller-selected bag slot, including its sell-price information. Mouse hover remains available.
+- Hide Aquifer-owned tooltips on empty slots, window handoff, combat and bag close without hiding another window's tooltip.
+
 ## 2.2.1
 
 - Hide the focus notice by default and remove its recovery button. Use `/aq recover`; `/aq notice` enables the optional debug label.

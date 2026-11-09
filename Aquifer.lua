@@ -123,6 +123,40 @@ end
 
 local function inCombat() return InCombatLockdown() end
 
+-- Tooltip work stays outside secure navigation; the existing 0.1s UI tick follows it.
+local tooltipSlot, tooltipKey, hoverSlot, tooltipFocus
+local function ownsSlotTooltip()
+    return tooltipSlot and GameTooltip and (not GameTooltip.GetOwner or GameTooltip:GetOwner()==tooltipSlot)
+end
+function GB.HideSlotTooltip()
+    if ownsSlotTooltip() then GameTooltip:Hide() end
+    tooltipSlot,tooltipKey=nil,nil
+end
+function GB.UpdateSlotTooltip()
+    if not GameTooltip or not GameTooltip.SetOwner or not GameTooltip.SetBagItem then return end
+    if not frame or not frame:IsShown() or inCombat() or not hoverSlot and (nav:GetAttribute("focusowned")==0
+        or nav:GetAttribute("padnav")~=1 or GB.itemMenu:IsShown() or GB.bagMenu:IsShown()) then
+        GB.HideSlotTooltip(); return
+    end
+    local selected=nav:GetAttribute("focus") or 1
+    local moved=tooltipFocus~=selected
+    if moved then hoverSlot=nil; tooltipFocus=selected end
+    local b=hoverSlot or slots[selected]
+    local icon,count,_,_,link
+    if b and b.bag and b:IsShown() then icon,count,_,_,link=itemInfo(b.bag,b.slot) end
+    if not icon then GB.HideSlotTooltip(); return end
+    local key=tostring(b.bag)..":"..tostring(b.slot)..":"..tostring(link)..":"..tostring(count)
+    -- Another window's mouse tooltip wins until the next selection/hover change.
+    if not moved and not hoverSlot and GameTooltip:IsShown() and GameTooltip.GetOwner
+        and GameTooltip:GetOwner()~=tooltipSlot then return end
+    if tooltipSlot~=b or tooltipKey~=key or not ownsSlotTooltip() or not GameTooltip:IsShown() then
+        GameTooltip:SetOwner(b,"ANCHOR_RIGHT")
+        GameTooltip:SetBagItem(b.bag,b.slot)
+        GameTooltip:Show()
+        tooltipSlot,tooltipKey=b,key
+    end
+end
+
 -- Which entries the item menu offers for one item. Pure: takes the link and stack count.
 -- Use only if the item is usable, Equip only if it is equippable, Split only for stacks.
 -- This client has no global IsEquippableItem / GetItemSpell / IsUsableItem / GetItemInfoInstant /
@@ -191,12 +225,21 @@ local function makeSlot(i)
                 SecureHandlerExecute(nav,GB.NAV_CLAMP)
                 GB.UpdateFooter()
             end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            if GameTooltip.SetBagItem then GameTooltip:SetBagItem(self.bag, self.slot) end
-            GameTooltip:Show()
+            hoverSlot=self
+            tooltipFocus=nav and (nav:GetAttribute("focus") or 1)
+            -- Mouse inspection still works without controller navigation or in another window.
+            if not inCombat() then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                if GameTooltip.SetBagItem then GameTooltip:SetBagItem(self.bag, self.slot) end
+                GameTooltip:Show()
+                tooltipSlot,tooltipKey=self,nil
+            end
         end
     end)
-    b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    b:SetScript("OnLeave", function(self)
+        if hoverSlot==self then hoverSlot=nil end
+        if tooltipSlot==self then GB.HideSlotTooltip() end
+    end)
     slots[i] = b
     SetRef(nav, "s" .. i, b)
     return b
@@ -552,6 +595,7 @@ end
 function GB.MenuHints() return GB.HintText({ { "cross", "Select" }, { "circle", "Close" } }) end
 -- Called often (cheap): re-draws the footer when the focus moves to an item / empty slot.
 function GB.UpdateFooter()
+    GB.UpdateSlotTooltip()
     if not (footer and frame and frame:IsShown() and nav) then return end
     if GB.UpdateFocusNotice then GB.UpdateFocusNotice() end
     if nav:GetAttribute("combatpaused") == 1 then footer:SetText("Controller paused during combat"); return end
@@ -1019,6 +1063,7 @@ function GB.ControllerFocusGained()
     if footer then footer.shownKey = nil end
 end
 function GB.ControllerFocusLost()
+    hoverSlot=nil; GB.HideSlotTooltip()
     if inCombat() then return end
     focusMark = focusMark or rememberSelection()
     nav:SetAttribute("focusowned", 0)
@@ -1231,6 +1276,7 @@ local function build()
         GB.UpdateFocusNotice(); footer.shownKey = nil; GB.Refresh(); GB.RefreshInteraction(); GB.RegisterControllerFocus(); GB.UpdateFooter()
     end)
     frame:SetScript("OnHide", function()
+        hoverSlot=nil; tooltipFocus=nil; GB.HideSlotTooltip()
         GB.UnregisterControllerFocus()
         if focusNotice and not bindHandoff then focusNotice:Hide() end
         if search then search:ClearFocus() end
@@ -1550,6 +1596,7 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
         build(); buildMinimap(); buildSettings(); hookAll()
         GB.Layout()
     elseif e == "PLAYER_REGEN_DISABLED" then
+        hoverSlot=nil; GB.HideSlotTooltip()
         if frame then GB.SetEsc(false) end
     elseif e == "PLAYER_REGEN_ENABLED" then
         if frame then GB.SetEsc(true) end

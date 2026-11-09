@@ -94,6 +94,9 @@ C_Container={
   PickupContainerItem=function(b,s) picked={b,s} end,
 }
 GameTooltip=frame('Frame','GameTooltip')
+function GameTooltip:SetOwner(owner) self.owner=owner end
+function GameTooltip:GetOwner() return self.owner end
+function GameTooltip:SetBagItem(bag,slot) self.bag,self.slot=bag,slot end
 local hooks={}
 function hooksecurefunc(name,fn) local o=_G[name]; _G[name]=function(...) local r=o(...); fn(...); return r end end
 local defaultShown=false
@@ -834,3 +837,25 @@ do
   GB.Close()
 end
 io.stdout:write('PASS: 2.2.1 quiet notice/recovery, contextual footer, sale-price guards, mail attach and safe hover selection\n')
+
+-- Controller tooltips follow the selected slot without changing the secure bindings.
+do
+ GB.Open();nav.attrs.focusowned=1;nav.attrs.focus=1;GB.UpdateFooter()
+ assert(GameTooltip:IsShown() and GameTooltip.owner==named.AquiferSlot1 and GameTooltip.bag==0 and GameTooltip.slot==1)
+ items['0:2']={iconFileID=200,stackCount=1,hyperlink='[Second item]'};GB.Refresh()
+ nav.attrs.focus=2;GB.UpdateFooter();assert(GameTooltip.owner==named.AquiferSlot2 and GameTooltip.slot==2)
+ named.AquiferSlot1.scripts.OnEnter(named.AquiferSlot1);GB.UpdateFooter();assert(GameTooltip.owner==named.AquiferSlot1)
+ nav.attrs.focus=1;GB.UpdateFooter();nav.attrs.focus=2;GB.UpdateFooter();assert(GameTooltip.owner==named.AquiferSlot2)
+ named.AquiferSlot1.scripts.OnLeave(named.AquiferSlot1);assert(GameTooltip:IsShown() and GameTooltip.owner==named.AquiferSlot2)
+ nav.attrs.focus=5;GB.UpdateFooter();assert(not GameTooltip:IsShown(),'empty slot tooltip')
+ nav.attrs.focus=1;GB.UpdateFooter();GB.ControllerFocusLost();assert(not GameTooltip:IsShown())
+ GameTooltip:SetOwner(MerchantFrame);GameTooltip:Show();GB.UpdateFooter();assert(GameTooltip:IsShown(),'hid stock tooltip')
+ GameTooltip:Hide();nav.attrs.focusowned=1;GB.UpdateFooter();assert(GameTooltip:IsShown())
+ combat=true;GB.UpdateFooter();assert(not GameTooltip:IsShown());combat=false
+ GB.UpdateFooter();assert(GameTooltip:IsShown())
+ nav.attrs.padnav=0;named.AquiferSlot1.scripts.OnEnter(named.AquiferSlot1);GB.UpdateFooter()
+ assert(GameTooltip:IsShown() and GameTooltip.owner==named.AquiferSlot1,'mouse tooltip with controller disabled')
+ named.AquiferSlot1.scripts.OnLeave(named.AquiferSlot1);GB.UpdateFooter();assert(not GameTooltip:IsShown())
+ nav.attrs.padnav=1;GB.UpdateFooter();GB.Close();assert(not GameTooltip:IsShown())
+end
+io.stdout:write('PASS: selected-item tooltip, mouse handoff, empty slots, focus loss, foreign tooltip ownership, combat and close cleanup\n')
