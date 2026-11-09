@@ -102,4 +102,4 @@ Type **/aq bug** after a problem. Choose **Select all**, press **Ctrl+C**, and p
 - the **Comments** section here on CurseForge, or
 - **github.com/waterys419/Aquifer/issues**
 
-The report includes versions, gamepad settings, detected loaded bag addons and recent events recorded quietly. Character and realm names are replaced with placeholders; account details, chat messages and inventory contents are not included. Nothing is sent automatically. You do not need to enable /aq debug first.
+If you saw a **Lua error** popup, please copy that error text too (use the arrows in the error box to get the first one). The report includes versions, gamepad settings, detected loaded bag addons and recent events recorded quietly. Character and realm names are replaced with placeholders; account details, chat messages and inventory contents are not included. Nothing is sent automatically. You do not need to enable /aq debug first.

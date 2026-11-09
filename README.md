@@ -174,4 +174,4 @@ The report includes the addon/client versions, locale, gamepad setting, detected
 - **Only tested on WoW Forever (1.60.1) with gamepad mode on.** Other clients, or other bag addons running at the same time, may conflict with Aquifer.
 - **If Aquifer ever stops responding to your controller,** type `/reload` to restore it.
 
-**Found a bug?** Type `/aq bug`, copy the text, and paste it with the steps you took at https://github.com/waterys419/Aquifer/issues or in the Comments on the Aquifer CurseForge page.
+**Found a bug?** Type `/aq bug`, copy the text, and paste it with the steps you took at https://github.com/waterys419/Aquifer/issues or in the Comments on the Aquifer CurseForge page. If you saw a Lua error popup, please include that error text too.
