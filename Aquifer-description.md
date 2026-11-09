@@ -84,6 +84,22 @@ Made by Audrey. Source and issues: https://github.com/waterys419/Aquifer
 
 Licensed under the MIT License. See the LICENSE file in the download.
 
+## Bind to action bar
+
+Choose an item, press **Triangle**, then **Bind**. A picker shows your controller buttons laid out like your on-screen bars (for example **X**, **L2 + X**, **L2 + R2 + Triangle**). Move with the **d-pad**, press **X** to place the item on that button, or **O** to cancel. **L1/R1** switch pages. Works out of combat.
+
+## Known issues
+
+- **In combat, Aquifer pauses controller input.** This is a Blizzard restriction. Your selection comes back when combat ends.
+- **Identical stacks:** if items move while you switch windows, the yellow selection can jump to another stack of the same item.
+- **Only tested on WoW Forever (1.60.1) with gamepad mode on.** Other clients, or other bag addons running at the same time, may conflict with Aquifer.
+- **If Aquifer ever stops responding to your controller,** type `/reload` to restore it.
+
 ## Report a bug
 
-Type **/aq bug** after a problem. Choose **Select all**, press **Ctrl+C**, and paste the text at **github.com/waterys419/Aquifer/issues** with the steps you took. The report includes versions, gamepad settings, detected loaded bag addons and recent events recorded quietly. Character and realm names are replaced with placeholders; account details, chat messages and inventory contents are not included. Nothing is sent automatically. You do not need to enable /aq debug first.
+Type **/aq bug** after a problem. Choose **Select all**, press **Ctrl+C**, and paste the text with the steps you took in either place:
+
+- the **Comments** section here on CurseForge, or
+- **github.com/waterys419/Aquifer/issues**
+
+The report includes versions, gamepad settings, detected loaded bag addons and recent events recorded quietly. Character and realm names are replaced with placeholders; account details, chat messages and inventory contents are not included. Nothing is sent automatically. You do not need to enable /aq debug first.
