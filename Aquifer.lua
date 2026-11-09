@@ -3,7 +3,7 @@ local addonName = ...
 local GB = {}
 _G.Aquifer = GB
 
-local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false, notice = false }
+local DEFAULTS = { enabled = true, columns = 8, scale = 1, padNav = true, collapsed = false, notice = false, debugEnabled = false }
 local MM_DEFAULT = { angle = 215, hide = false }
 -- Frame refs: the global SecureHandlerSetFrameRef works even when BackdropTemplate wipes the secure template's methods (WoW Forever crash at :SetFrameRef, Nov 6).
 local function SetRef(f, k, v) SecureHandlerSetFrameRef(f, k, v) end
@@ -655,63 +655,495 @@ function GB.OpenChatWith(link)
     if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then return true end
     say2(link)
 end
--- Native binding handoff: release input, then let the PLAYER open Blizzard bags.
--- Never delegate a stock bag click or call BindItem/EnterBindingMode/focus methods.
--- Keep replacement suspended until an explicit return, including transient hides.
 local DEFAULT_FRAMES = { "ContainerFrameCombinedBags" }
 for i = 1, 13 do DEFAULT_FRAMES[#DEFAULT_FRAMES + 1] = "ContainerFrame" .. i end
-local bindHandoff, bindWasOpen, bindReturnPending = false, false, false
+-- Controller-only action-slot picker for Bind (2.2.7). Out of combat this client allows the
+-- same two calls the stock UI makes on a hardware drop: PickupContainerItem, then PlaceAction.
+-- Never drive the stock Bind editor, its focus methods or SetPreferredGamepadInteractTarget.
+-- The gamepad cross bars store their actions in gamepad storage slots. The page-unit slot IDs are
+-- fixed positions (Top 1-8, Left 9-16, Right 17-24, Bottom 25-32); IDs 5-8 are reserved UI actions.
+-- Buttons 1-4 of each bar are the d-pad diamond, 5-8 the face-button diamond; a bar is reached by
+-- holding its cross-bar modifier (left, right or both). This mirrors the stock layout code.
+local GP_TILE, GP_GAP = 40, 3
+local GP_COLS, GP_ROWS = 12, 9
+local GP_RESERVED_FIRST, GP_RESERVED_COUNT = 5, 4
+local bindHandoff = false
+local pickerPage, pickerSel = 1, 1
+local pickerBag, pickerSlot
+local picker, pickerHl, pickerPageText, pickerHint
+local pickerTiles, pickerPool, pickerPad = {}, {}, {}
+local pickerPageKeys
+local pickerAttrStuck = false
+local hideDefault
+local function bindCursorBusy()
+    if GetCursorInfo then return GetCursorInfo() ~= nil end
+    return CursorHasItem and CursorHasItem()
+end
 function GB.IsBindingHandoff() return bindHandoff end
-local function stockBindUIShown()
-    local edit = _G.GamepadActionBarEditFrame
-    if edit and edit.IsShown and edit:IsShown() then return true end
-    for _, name in ipairs(DEFAULT_FRAMES) do
-        local bag = _G[name]
-        if bag and bag:IsShown() then return true end
+local function actionInfo(slot)
+    local f = (C_ActionBar and C_ActionBar.GetActionInfo) or GetActionInfo
+    if not f then return end
+    return f(slot)
+end
+local function actionTexture(slot)
+    local f = (C_ActionBar and C_ActionBar.GetActionTexture) or GetActionTexture
+    if not f then return end
+    return f(slot)
+end
+local function gpConstants()
+    local c = Constants and Constants.GamepadActionBarConstants
+    if type(c) == "table" then return c end
+end
+local function gpPageCount()
+    local c = gpConstants()
+    return math.max(1, (c and c.NUM_STANDARD_PAGES_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT) or 3)
+end
+local function gpPageUnitSlots()
+    local c = gpConstants()
+    return math.max(1, (c and c.NUM_PAGEABLE_SLOTS_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT_STANDARD_PAGE) or 32)
+end
+local function gpReserved()
+    local c = gpConstants()
+    return math.max(0, (c and c.NUM_RESERVED_SLOTS_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT) or 4)
+end
+local function gpFirstStorage()
+    local f = C_GamepadUI and C_GamepadUI.GetFirstGamepadActionStorageSlotIndex
+    if not f then return end
+    return tonumber(f())
+end
+-- Same formula as the stock GamepadActionBarBindingUtil, so PlaceAction hits the slot the
+-- gamepad button really fires.
+local function gpStorageSlot(page, pageUnitSlotID)
+    local first = gpFirstStorage()
+    if not first then return end
+    local perPage = gpPageUnitSlots()
+    local reserved = gpReserved()
+    local slot = perPage * (page - 1) + first + (pageUnitSlotID - 1) - reserved * (page - 1)
+    if pageUnitSlotID >= GP_RESERVED_FIRST then slot = slot - reserved end
+    return slot
+end
+local function validStorage(slot)
+    local f = C_GamepadUI and C_GamepadUI.IsValidGamepadActionStorageSlotIndex
+    if not f then return true end
+    return f(slot) and true or false
+end
+local function bindingKey(command)
+    if not GetBindingKey then return end
+    local key = GetBindingKey(command, 1) or GetBindingKey(command)
+    if type(key) == "string" and key ~= "" then return key end
+end
+local function modifierKeys()
+    return bindingKey("GAMEPADLEFTMOD"), bindingKey("GAMEPADRIGHTMOD")
+end
+-- Quiet bounded diagnostics; /aq debug only enables chat output.
+local debugManager, debugState, debugElapsed
+local function debugValue(v)
+    if issecretvalue and issecretvalue(v) then return "secret" end
+    if v==nil then return "-" end
+    return tostring(v)
+end
+local function debugFrame(f)
+    local name=f and f.GetName and f:GetName()
+    if type(name)~="string" then return "-" end
+    -- Never log arbitrary unit/character-named frames.
+    if name:match("^Aquifer[%w_]*$") or name:match("^ContainerFrame[%w_]*$") or name:match("^ChatFrame%d+$")
+        or name=="GamepadActionBarEditFrame" or name=="BankFrame" or name=="MerchantFrame"
+        or name=="MailFrame" or name=="TradeFrame" or name=="CharacterFrame" then return name end
+    return "<other frame>"
+end
+local function debugSnapshot()
+    local m=SmartNavigationSecureHelper and GamepadMode and GamepadMode.FrameControlsManager
+    local edit=_G.GamepadActionBarEditFrame
+    local cursor=GetCursorInfo and GetCursorInfo() or (CursorHasItem and CursorHasItem() and "item")
+    return "picker="..debugValue(bindHandoff).." page="..debugValue(pickerPage).." sel="..debugValue(pickerSel)
+        .." slot="..debugValue(pickerTiles and pickerTiles[pickerSel] and pickerTiles[pickerSel].slot or nil)
+        .." item="..debugValue(pickerBag and (pickerBag..":"..pickerSlot) or nil)
+        .." bag="..debugValue(frame and frame:IsShown()).." owned="..debugValue(nav and nav:GetAttribute("focusowned"))
+        .." owner="..debugFrame(m and m.focusedFrame).." cursor="..debugValue(cursor)
+        .." editor="..debugValue(edit and edit:IsShown()).." mode="..debugValue(edit and edit.activeMode)
+        .." combat="..debugValue(inCombat())
+end
+function GB.DebugTrace(event,detail)
+    if not DB then return end
+    if type(DB.debugLog)~="table" then DB.debugLog={} end
+    DB.debugSequence=(DB.debugSequence or 0)+1
+    local line=DB.debugSequence.." "..string.format("%.2f",GetTime and GetTime() or 0).." "..event
+        .." "..debugValue(detail).." | "..debugSnapshot()
+    table.insert(DB.debugLog,line)
+    while #DB.debugLog>200 do table.remove(DB.debugLog,1) end
+    if DB.debugEnabled then print("|cff66ccffAquifer debug|r "..line) end
+end
+function GB.DebugPoll(elapsed)
+    if not DB then return end
+    debugElapsed=(debugElapsed or 0)+(elapsed or 0)
+    if debugElapsed<(DB.debugEnabled and 0.1 or 0.25) then return end
+    debugElapsed=0
+    local m=SmartNavigationSecureHelper and GamepadMode and GamepadMode.FrameControlsManager
+    if m and m~=debugManager and type(m.FrameShown)=="function" and type(m.FrameHidden)=="function" then
+        -- Secure post-hooks leave Blizzard's wrapped methods and return values intact.
+        hooksecurefunc(m,"FrameShown",function(_,f) GB.DebugTrace("manager.FrameShown",debugFrame(f)) end)
+        hooksecurefunc(m,"FrameHidden",function(_,f) GB.DebugTrace("manager.FrameHidden",debugFrame(f)) end)
+        debugManager=m
+        GB.DebugTrace("manager hooked")
+    end
+    local state=debugSnapshot()
+    if state~=debugState then debugState=state; GB.DebugTrace("state") end
+end
+local PICKER_BIND_BASE = [[
+self:ClearBindings()
+self:SetBindingClick(true, "PADDUP", self:GetFrameRef("up"), "LeftButton")
+self:SetBindingClick(true, "PADDDOWN", self:GetFrameRef("down"), "LeftButton")
+self:SetBindingClick(true, "PADDLEFT", self:GetFrameRef("left"), "LeftButton")
+self:SetBindingClick(true, "PADDRIGHT", self:GetFrameRef("right"), "LeftButton")
+self:SetBindingClick(true, "PAD1", self:GetFrameRef("place"), "LeftButton")
+self:SetBindingClick(true, "PAD2", self:GetFrameRef("cancel"), "LeftButton")
+]]
+-- Page keys are whatever is not one of the cross-bar modifiers (the on-screen bars use those).
+local PAGE_KEY_PAIRS = { { "PADLSHOULDER", "PADRSHOULDER" }, { "PADLTRIGGER", "PADRTRIGGER" } }
+local function pickerPageKeyPair()
+    local leftMod, rightMod = modifierKeys()
+    for _, pair in ipairs(PAGE_KEY_PAIRS) do
+        if pair[1] ~= leftMod and pair[1] ~= rightMod and pair[2] ~= leftMod and pair[2] ~= rightMod then
+            return pair[1], pair[2]
+        end
+    end
+    return PAGE_KEY_PAIRS[1][1], PAGE_KEY_PAIRS[1][2]
+end
+local function pickerKeys()
+    if pickerPageKeys then return pickerPageKeys[1], pickerPageKeys[2] end
+    return pickerPageKeyPair()
+end
+local function pickerBindSnippet()
+    local prevKey, nextKey = pickerKeys()
+    return PICKER_BIND_BASE
+        .. 'self:SetBindingClick(true, "' .. prevKey .. '", self:GetFrameRef("prevpage"), "LeftButton")\n'
+        .. 'self:SetBindingClick(true, "' .. nextKey .. '", self:GetFrameRef("nextpage"), "LeftButton")\n'
+end
+-- The client ships the gamepad labels itself (SharedConstants SetGamepadBindingStrings). Prefer
+-- GetBindingText/the KEY_* markup so the tile shows the player's own button art; text is the fallback.
+local GP_KEY_TEXT = { PAD1 = "X", PAD2 = "O", PAD3 = "Sq", PAD4 = "Tri",
+    PADDUP = "\e", PADDDOWN = "\g", PADDLEFT = "\d", PADDRIGHT = "\f",
+    PADLSHOULDER = "L1", PADRSHOULDER = "R1", PADLTRIGGER = "L2", PADRTRIGGER = "R2",
+    PADLSTICK = "L3", PADRSTICK = "R3" }
+local function keyPart(key, glyphSize)
+    local text
+    if GetBindingText then
+        local ok, t = pcall(GetBindingText, key, 1)
+        if ok and type(t) == "string" and t ~= "" and t ~= key then text = t end
+    end
+    if not text then
+        local g = _G["KEY_" .. key] or _G["KEY_ABBR_" .. key]
+        if type(g) == "string" then text = g end
+    end
+    if not text then text = GP_KEY_TEXT[key] or ("[" .. key .. "]") end
+    return (text:gsub("(%|A:[^:]+):%d+:%d+|a", "%1:" .. glyphSize .. ":" .. glyphSize .. "|a"))
+end
+local function comboLabel(key, mods)
+    local parts = {}
+    for _, m in ipairs(mods or {}) do if m then parts[#parts + 1] = keyPart(m, 10) end end
+    parts[#parts + 1] = keyPart(key, (#parts >= 2) and 10 or 11)
+    return table.concat(parts, "|cffbbbbbb+|r")
+end
+-- On-screen layout: top bar above, left/right cross bars beside each other, bottom bar below.
+-- Left diamond = d-pad buttons, right diamond = face buttons.
+local GP_BARS = {
+    { col = 4, row = 0 },  -- top bar: only the d-pad diamond is bindable
+    { col = 0, row = 3 },  -- left cross bar (left modifier)
+    { col = 6, row = 3 },  -- right cross bar (right modifier)
+    { col = 3, row = 6 },  -- bottom cross bar (both modifiers)
+}
+local GP_DIAMOND = { { 0, 1 }, { 1, 0 }, { 2, 1 }, { 1, 2 }, { 0, 1 }, { 1, 0 }, { 2, 1 }, { 1, 2 } }
+-- Only if the client cannot report the cross-bar bindings at all, fall back to the standard pad
+-- positions (d-pad left/up/right/down, then square/triangle/circle/cross).
+local GP_DEFAULT_KEYS = { "PADDLEFT", "PADDUP", "PADDRIGHT", "PADDDOWN", "PAD3", "PAD4", "PAD2", "PAD1" }
+local function anyGamepadActionBinding()
+    for i = 1, 8 do
+        if bindingKey("GAMEPADACTIONBUTTON" .. i) then return true end
     end
     return false
 end
-local function restoreAfterBind()
-    if not bindHandoff or not bindReturnPending then return end
-    if stockBindUIShown() or inCombat() then return end
-    local reopen = bindWasOpen
-    bindHandoff, bindWasOpen, bindReturnPending = false, false, false
-    nav:SetAttribute("bindinghandoff", nil)
-    if focusNotice then focusNotice:Hide() end
-    if reopen and DB.enabled then GB.Open() end
+local function pickerLayout()
+    local leftMod, rightMod = modifierKeys()
+    local useDefaultKeys = not anyGamepadActionBinding()
+    if useDefaultKeys then
+        leftMod = leftMod or "PADLTRIGGER"
+        rightMod = rightMod or "PADRTRIGGER"
+    end
+    local out = {}
+    for id = 1, gpPageUnitSlots() do
+        if not (id >= GP_RESERVED_FIRST and id < GP_RESERVED_FIRST + GP_RESERVED_COUNT) then
+            local bar = math.floor((id - 1) / 8) + 1
+            local idx = ((id - 1) % 8) + 1
+            local mods, reachable
+            if bar == 1 then mods, reachable = {}, true
+            elseif bar == 2 then mods, reachable = { leftMod }, leftMod ~= nil
+            elseif bar == 3 then mods, reachable = { rightMod }, rightMod ~= nil
+            else mods, reachable = { leftMod, rightMod }, (leftMod ~= nil and rightMod ~= nil) end
+            local key = bindingKey("GAMEPADACTIONBUTTON" .. idx)
+            if not key and useDefaultKeys then key = GP_DEFAULT_KEYS[idx] end
+            local slot = gpStorageSlot(pickerPage, id)
+            if reachable and key and slot and validStorage(slot) then
+                local geo = GP_BARS[bar] or GP_BARS[1]
+                local d = GP_DIAMOND[idx]
+                out[#out + 1] = {
+                    id = id, slot = slot, key = key, mods = mods,
+                    col = geo.col + d[1] + (idx <= 4 and 0 or 3),
+                    row = geo.row + d[2],
+                }
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.row ~= b.row then return a.row < b.row end
+        return a.col < b.col
+    end)
+    return out
 end
-function GB.PollControllerBind() restoreAfterBind() end
-function GB.CancelControllerBind()
+local function PickerUpdateHighlight()
+    local t = pickerTiles[pickerSel]
+    if t and t.btn and pickerHl then
+        pickerHl:ClearAllPoints()
+        pickerHl:SetPoint("TOPLEFT", t.btn, "TOPLEFT", -2, 2)
+        pickerHl:SetPoint("BOTTOMRIGHT", t.btn, "BOTTOMRIGHT", 2, -2)
+        pickerHl:Show()
+    elseif pickerHl then
+        pickerHl:Hide()
+    end
+end
+local function PickerRefreshIcons()
+    for _, t in ipairs(pickerTiles) do
+        local tex = actionTexture(t.slot)
+        if tex then
+            t.btn.icon:SetTexture(tex); t.btn.icon:SetVertexColor(1, 1, 1, 1)
+        else
+            t.btn.icon:SetTexture("Interface\\Buttons\\WHITE8X8"); t.btn.icon:SetVertexColor(0.05, 0.09, 0.13, 1)
+        end
+    end
+end
+local function pickerTileButton(i)
+    local b = pickerPool[i]
+    if b then return b end
+    b = CreateFrame("Button", "AquiferPickerSlot" .. i, picker)
+    b:SetSize(GP_TILE, GP_TILE)
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetPoint("TOPLEFT", 1, -1)
+    b.icon:SetPoint("BOTTOMRIGHT", -1, 1)
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+    b.label = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.label:SetPoint("BOTTOMLEFT", 1, 1)
+    b:RegisterForClicks("AnyUp")
+    b:SetScript("OnClick", function()
+        if not bindHandoff then return end
+        for idx, t in ipairs(pickerTiles) do
+            if t.btn == b then pickerSel = idx; break end
+        end
+        PickerUpdateHighlight()
+    end)
+    pickerPool[i] = b
+    return b
+end
+local function PickerRebuild(keepSlot)
+    local old = pickerTiles[pickerSel]
+    keepSlot = keepSlot or (old and old.slot)
+    pickerTiles = {}
+    local layout = pickerLayout()
+    for i, item in ipairs(layout) do
+        local btn = pickerTileButton(i)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", picker, "TOPLEFT",
+            PAD + item.col * (GP_TILE + GP_GAP), -(28 + item.row * (GP_TILE + GP_GAP)))
+        btn.label:SetText(comboLabel(item.key, item.mods))
+        btn.slot = item.slot
+        btn:Show()
+        item.btn = btn
+        pickerTiles[i] = item
+    end
+    for i = #layout + 1, #pickerPool do pickerPool[i]:Hide() end
+    pickerSel = 1
+    for i, item in ipairs(pickerTiles) do
+        if item.slot == keepSlot then pickerSel = i; break end
+    end
+    if pickerPageText then pickerPageText:SetText("Page " .. pickerPage .. "/" .. gpPageCount()) end
+    if pickerHint then
+        if #pickerTiles == 0 then
+            pickerHint:SetText("|cffff6666No gamepad action buttons found on this page.|r")
+        else
+            local prevKey, nextKey = pickerKeys()
+            pickerHint:SetText(GB.HintText({ { "cross", "Place" }, { "circle", "Cancel" } })
+                .. "   |cffffd100D-pad choose | " .. keyPart(prevKey, 11) .. " " .. keyPart(nextKey, 11) .. " page|r")
+        end
+    end
+    PickerRefreshIcons()
+    PickerUpdateHighlight()
+end
+local function pickerMoveDir(dir)
+    local cur = pickerTiles[pickerSel]
+    if not cur then return end
+    local best, bestScore
+    for i, t in ipairs(pickerTiles) do
+        local dx, dy = t.col - cur.col, t.row - cur.row
+        local ok = (dir == "right" and dx > 0) or (dir == "left" and dx < 0)
+            or (dir == "up" and dy < 0) or (dir == "down" and dy > 0)
+        if ok then
+            local score
+            if dir == "up" or dir == "down" then score = math.abs(dx) * 2 + math.abs(dy)
+            else score = math.abs(dx) + math.abs(dy) * 2 end
+            if not bestScore or score < bestScore then best, bestScore = i, score end
+        end
+    end
+    if best then pickerSel = best; PickerUpdateHighlight() end
+end
+function GB.PickerMove(dir)
+    if bindHandoff then pickerMoveDir(dir) end
+end
+function GB.PickerPage(delta)
     if not bindHandoff then return end
-    if stockBindUIShown() then say2("Close Blizzard's bags and binding dialog first."); return end
-    bindReturnPending = true
-    if inCombat() then say2("Aquifer will return after combat.") end
-    restoreAfterBind()
+    local page = pickerPage + (delta or 0)
+    local count = gpPageCount()
+    if page < 1 then page = count elseif page > count then page = 1 end
+    pickerPage = page
+    PickerRebuild()
 end
-function GB.StartControllerBind(b)
-    -- Idempotent: duplicate mouse/controller callbacks cannot toggle a stock bag,
-    -- print a second prompt, or restart the session.
-    if bindHandoff or inCombat() or not (frame and nav and b and b.bag and b.slot) then return false end
-    if CursorHasItem and CursorHasItem() then say2("Clear the item from your cursor before binding."); return false end
+function GB.PickerState()
+    local t = pickerTiles[pickerSel]
+    return pickerPage, pickerSel, t and t.slot, bindHandoff, #pickerTiles
+end
+-- forced: closing because the bag itself was closed; must also work in combat (restricted Hide).
+function GB.CloseActionPicker(cancelled, forced)
+    if not bindHandoff then return false end
+    if inCombat() and not forced then say2("[O] Cancel after combat."); return false end
+    bindHandoff = false
+    if picker then SecureHandlerExecute(picker, "self:ClearBindings(); self:Hide()") end
+    if inCombat() then
+        pickerAttrStuck = true   -- clear the nav attribute after combat; it is protected now
+    else
+        SecureHandlerExecute(nav, "self:SetAttribute('bindinghandoff', nil); self:RunAttribute('rebind')")
+    end
+    local t = pickerTiles[pickerSel]
+    GB.DebugTrace(cancelled and "action picker cancel" or "action picker close", t and t.slot or nil)
+    if footer then footer.shownKey = nil end
+    if focusNotice then focusNotice:Hide() end
+    return true
+end
+function GB.PlacePickedAction()
+    if not bindHandoff then return false end
+    if inCombat() then say2("Binds wait until combat ends."); return false end
+    local tile = pickerTiles[pickerSel]
+    if not tile then say2("No gamepad action slot selected. Nothing changed."); return false end
+    local slot = tile.slot
+    local before = actionInfo(slot)
+    pickup(pickerBag, pickerSlot)
+    if not bindCursorBusy() then
+        GB.DebugTrace("action picker pickup failed", pickerBag .. ":" .. pickerSlot)
+        say2("This item cannot be picked up. Nothing changed.")
+        GB.CloseActionPicker(true)
+        return false
+    end
+    local ok, err = pcall(PlaceAction, slot)
+    if not ok then
+        if ClearCursor then ClearCursor() end
+        DB.bindBlocked = { event = "PlaceAction", action = tostring(err) }
+        GB.DebugTrace("action picker refused", tostring(err))
+        say2("The client refused action placement. Nothing changed.")
+        GB.CloseActionPicker(true)
+        return false
+    end
+    -- A protected call that did nothing is indistinguishable from success unless we look:
+    -- an empty slot that stays empty means the client refused. Put the item back.
+    if not before and not actionInfo(slot) then
+        if bindCursorBusy() and ClearCursor then ClearCursor() end
+        DB.bindBlocked = { event = "PlaceAction", action = "slot " .. slot .. " unchanged" }
+        GB.DebugTrace("action picker refused", "slot " .. slot .. " unchanged")
+        say2("The client refused action placement. Nothing changed.")
+        GB.CloseActionPicker(true)
+        return false
+    end
+    if bindCursorBusy() and ClearCursor then ClearCursor() end   -- displaced action/item; default is to clear it
+    GB.DebugTrace("action slot place", slot)
+    GB.CloseActionPicker(false)
+    say2("Bound to action slot " .. slot .. ".")
+    return true
+end
+function GB.OpenActionPicker(b)
+    if bindHandoff then return false end
+    if inCombat() then say2("Binds wait until combat ends."); return false end
+    if not (frame and nav and b and b.bag and b.slot) then return false end
+    if bindCursorBusy() then say2("Place the held item first, or cancel it with [O]."); return false end
     local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(b.bag, b.slot)
     if not (info and info.itemID) then return false end
     local edit = _G.GamepadActionBarEditFrame
-    if edit and edit.IsShown and edit:IsShown() then return false end
-    DB.bindBlocked = nil
-    bindHandoff, bindWasOpen, bindReturnPending = true, frame:IsShown(), false
-    nav:SetAttribute("bindinghandoff", 1)
-    SecureHandlerExecute(nav, "self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
+    if edit and edit:IsShown() then return false end
+    pickerBag, pickerSlot = b.bag, b.slot
+    bindHandoff = true
+    pickerPage = math.max(1, math.min(gpPageCount(), pickerPage or 1))
+    pickerPageKeys = { pickerPageKeyPair() }
+    focusMark = rememberSelection()
+    SecureHandlerExecute(nav, "self:SetAttribute('bindinghandoff', 1); self:ClearBindings(); self:GetFrameRef('hl'):Hide()")
     SecureHandlerExecute(GB.itemMenu, MENU_HIDE_ALL)
     SecureHandlerExecute(GB.bagMenu, MENU_HIDE_ALL)
-    focusMark = rememberSelection()
-    frame:Hide()
-    if focusNotice then GB.UpdateFocusNotice() end
-    -- No stock method, click delegation, cursor pickup, focus change or preselection.
-    -- Opening stock UI requires the next physical input, outside this addon callback.
-    local bagKey = GetBindingKey and (GetBindingKey("OPENALLBAGS") or GetBindingKey("TOGGLEBACKPACK"))
-    local hint = bagKey and ("Press your Bags key (" .. bagKey .. ")") or "Press your normal Bags button"
-    say2(hint .. "; select " .. (info.hyperlink or ("item " .. info.itemID)) .. " (bag " .. b.bag .. ", slot " .. b.slot .. "), then More Actions > Bind to Action Bar. Close stock bags, then type /aq bindcancel to return to Aquifer.")
+    PickerRebuild()
+    picker:Show()
+    SecureHandlerExecute(picker, pickerBindSnippet())
+    local t = pickerTiles[pickerSel]
+    say2("Choose an action slot. D-pad moves, [X] places, [O] cancels.")
+    GB.DebugTrace("action picker open", pickerBag .. ":" .. pickerSlot .. " page " .. pickerPage .. " slot " .. (t and t.slot or "none"))
     return true
+end
+local function buildActionPicker()
+    picker = CreateFrame("Frame", "AquiferActionPicker", UIParent, "SecureHandlerBaseTemplate,BackdropTemplate")
+    picker:SetFrameStrata("DIALOG")
+    picker:SetClampedToScreen(true)
+    picker:EnableMouse(true)
+    picker:SetSize(PAD * 2 + GP_COLS * GP_TILE + (GP_COLS - 1) * GP_GAP,
+        GP_ROWS * GP_TILE + (GP_ROWS - 1) * GP_GAP + 52)
+    picker:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
+    picker:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
+    picker:SetBackdropColor(0.02, 0.09, 0.15, 0.98)
+    picker:SetBackdropBorderColor(0.2, 0.6, 0.85, 1)
+    local title = picker:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", PAD, -8)
+    title:SetText("Bind to action bar")
+    pickerPageText = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    pickerPageText:SetPoint("TOPRIGHT", -PAD, -9)
+    pickerHint = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    pickerHint:SetPoint("BOTTOMLEFT", PAD, 8)
+    pickerHint:SetText(GB.HintText({ { "cross", "Place" }, { "circle", "Cancel" } }))
+    pickerHl = CreateFrame("Frame", "AquiferActionPickerFocus", picker, "BackdropTemplate")
+    pickerHl:SetFrameLevel(picker:GetFrameLevel() + 20)
+    pickerHl:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
+    pickerHl:SetBackdropBorderColor(1, 0.9, 0.2, 1)
+    pickerHl:Hide()
+    local function padButton(key, label, handler)
+        -- Same proven shape as the item-menu entries: secure frame, up-only click, snippet keeps
+        -- the restricted click path, PostClick runs the addon callback.
+        local b = CreateFrame("Button", "AquiferPicker" .. label, picker, "SecureActionButtonTemplate,SecureHandlerClickTemplate")
+        b:SetSize(1, 1)
+        b:SetPoint("TOPLEFT", picker, "TOPLEFT", -10, -10)
+        b:RegisterForClicks("AnyUp")
+        b:SetAttribute("useOnKeyDown", false)
+        b:SetAttribute("_onclick", "if down then return end")
+        b:SetScript("PostClick", function(self, button, down)
+            if down then return end
+            handler()
+        end)
+        SetRef(picker, key, b)
+        pickerPad[key] = b
+    end
+    padButton("up", "Up", function() GB.PickerMove("up") end)
+    padButton("down", "Down", function() GB.PickerMove("down") end)
+    padButton("left", "Left", function() GB.PickerMove("left") end)
+    padButton("right", "Right", function() GB.PickerMove("right") end)
+    padButton("place", "Place", function() GB.PlacePickedAction() end)
+    padButton("cancel", "Cancel", function() GB.CloseActionPicker(true) end)
+    padButton("prevpage", "PrevPage", function() GB.PickerPage(-1) end)
+    padButton("nextpage", "NextPage", function() GB.PickerPage(1) end)
+    picker:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+    picker:RegisterEvent("UPDATE_BINDINGS")
+    picker:SetScript("OnEvent", function(_, event)
+        if not bindHandoff then return end
+        if event == "UPDATE_BINDINGS" then PickerRebuild() else PickerRefreshIcons() end
+    end)
+    picker:Hide()
 end
 local PROBE_PAT = { "Bind", "ActionBar", "Prompt", "GamePad", "Gamepad", "Controller", "QuickBind" }
 local function probeMatch(k)
@@ -779,9 +1211,9 @@ end
 GB.MenuActions = {
     pickup = function(b) if not inCombat() then pickup(b.bag, b.slot) end end,
     bank = function() if GB.OpenBank then GB.OpenBank() end end,
-    -- Programmatic callers can prepare the handoff but never invoke stock binding code.
+    -- Programmatic callers open the picker; stock binding code is never invoked.
     bind = function(b)
-        GB.StartControllerBind(b)
+        GB.OpenActionPicker(b)
     end,
     -- Destroy: pick up, then the game's own delete confirmation (type DELETE for good items).
     destroy = function(b)
@@ -907,8 +1339,8 @@ local function newMenu(kind, defs, parent)
         end
         e:SetScript("PostClick", function(self, button, down)
             if stockBind then
-                if button == "LeftButton" and not down and not inCombat() then
-                    GB.StartControllerBind(menuSlot())
+                if button == "LeftButton" and not down then
+                    GB.OpenActionPicker(menuSlot())
                 end
                 return
             end
@@ -1054,6 +1486,7 @@ function GB.UnregisterControllerFocus()
     m:FrameHidden(frame)
 end
 function GB.ControllerFocusGained()
+    GB.DebugTrace("focus gained")
     if inCombat() or not frame:IsShown() or GB.IsBindingHandoff() then return end
     nav:SetAttribute("focusowned", 1)
     GB.Layout()
@@ -1063,6 +1496,7 @@ function GB.ControllerFocusGained()
     if footer then footer.shownKey = nil end
 end
 function GB.ControllerFocusLost()
+    GB.DebugTrace("focus lost")
     hoverSlot=nil; GB.HideSlotTooltip()
     if inCombat() then return end
     focusMark = focusMark or rememberSelection()
@@ -1135,10 +1569,10 @@ function GB.Toggle() if GB.IsOpen() then GB.Close() else GB.Open() end end
 
 -- Read the manager's public state; never change stock frame fields or focus methods.
 function GB.FocusLabel()
-    if bindHandoff then return stockBindUIShown() and "Stock binding: close stock bags first" or "Binding finished: /aq bindcancel" end
+    if bindHandoff then return "Action slots: [X] Place | [O] Cancel | L2/R2: page" end
     if inCombat() then return "Combat: controller paused" end
     local m=focusManager
-    if m and m.isUIFocused == false then return "World controls: L2/R2 or /aq recover" end
+    if m and m.isUIFocused == false then return "World controls: L2/R2 to Bags" end
     local active=m and m.focusedFrame
     if active and active~=frame then
         for _,pair in ipairs({{"BankFrame","Bank"},{"MerchantFrame","Vendor"},{"MailFrame","Mail"},
@@ -1169,7 +1603,7 @@ function GB.SyncControllerFocus()
     elseif nav:GetAttribute("focusowned")==0 then GB.ControllerFocusGained() end
 end
 function GB.RecoverControllerFocus()
-    if bindHandoff then GB.CancelControllerBind(); return end
+    if bindHandoff then GB.CloseActionPicker(true); return end
     if inCombat() then focusRecoveryPending=true; return end
     if not frame or not DB.enabled then return end
     focusMark=focusMark or rememberSelection()
@@ -1240,6 +1674,7 @@ local function build()
     buildMenu(frame)
     SetRef(nav,"itemmenu",GB.itemMenu)
     SetRef(nav,"bagmenu",GB.bagMenu)
+    buildActionPicker()
     buildContextAction()
     for _, d in ipairs({ "up", "down", "left", "right" }) do
         local btn = CreateFrame("Button", "AquiferPad" .. d, frame, "SecureHandlerClickTemplate")
@@ -1273,9 +1708,12 @@ local function build()
     frame.FocusGamepad = GB.ControllerFocusGained
     frame.UnfocusGamepad = GB.ControllerFocusLost
     frame:SetScript("OnShow", function()
+        GB.DebugTrace("Aquifer shown")
         GB.UpdateFocusNotice(); footer.shownKey = nil; GB.Refresh(); GB.RefreshInteraction(); GB.RegisterControllerFocus(); GB.UpdateFooter()
     end)
     frame:SetScript("OnHide", function()
+        GB.DebugTrace("Aquifer hidden")
+        if bindHandoff then GB.CloseActionPicker(true, true) end
         hoverSlot=nil; tooltipFocus=nil; GB.HideSlotTooltip()
         GB.UnregisterControllerFocus()
         if focusNotice and not bindHandoff then focusNotice:Hide() end
@@ -1411,7 +1849,7 @@ for i = 1, self:GetAttribute("defaultbagcount") or 0 do
     if bag and bag:IsShown() then bag:Hide(true) end
 end
 ]]
-local function hideDefault()
+hideDefault = function()
     if not DB or not DB.enabled or inCombat() or bindHandoff or not nav then return end
     local count = 0
     for _, name in ipairs(DEFAULT_FRAMES) do
@@ -1431,21 +1869,25 @@ local function hookAll()
     local toggles = { "ToggleAllBags", "ToggleBackpack", "ToggleBag" }
     local opens = { "OpenAllBags", "OpenBackpack", "OpenBag" }
     local closes = { "CloseAllBags", "CloseBackpack", "CloseBag" }
-    local function ours(fn)
+    local function ours(fn, name)
         return function(bagID)
+            GB.DebugTrace(name or "bag API",bagID)
             if type(bagID) == "number" and (bagID < 0 or bagID > (NUM_BAG_SLOTS or 4)) then return end
             if not DB.enabled or inCombat() or bindHandoff then return end -- Leave stock input/focus alone during binding.
             fn(); hideDefault()
         end
     end
-    for _, n in ipairs(toggles) do if _G[n] then hooksecurefunc(n, ours(GB.Toggle)) end end
-    for _, n in ipairs(opens) do if _G[n] then hooksecurefunc(n, ours(GB.Open)) end end
-    for _, n in ipairs(closes) do if _G[n] then hooksecurefunc(n, ours(GB.Close)) end end
+    for _, n in ipairs(toggles) do if _G[n] then hooksecurefunc(n, ours(GB.Toggle,n)) end end
+    for _, n in ipairs(opens) do if _G[n] then hooksecurefunc(n, ours(GB.Open,n)) end end
+    for _, n in ipairs(closes) do if _G[n] then hooksecurefunc(n, ours(GB.Close,n)) end end
     for _, name in ipairs(DEFAULT_FRAMES) do
         local f = _G[name]
-        if f and f.HookScript then f:HookScript("OnShow", function(self)
-            hideDefault()
-        end) end
+        if f and f.HookScript then
+            f:HookScript("OnShow", function(self)
+                GB.DebugTrace("stock shown",debugFrame(self)); hideDefault()
+            end)
+            f:HookScript("OnHide", function(self) GB.DebugTrace("stock hidden",debugFrame(self)) end)
+        end
     end
 end
 
@@ -1471,19 +1913,25 @@ local function say(m) print("|cff66ccffAquifer|r " .. m) end
 local function slash(msg)
     local cmd, arg = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     cmd = cmd:lower()
-    if cmd == "bank" then GB.OpenBank()
+    if cmd == "bug" then GB.ShowBugReport()
+    elseif cmd == "debug" then
+        DB.debugEnabled=not DB.debugEnabled
+        if DB.debugEnabled then
+            debugState=nil; GB.DebugTrace("debug on","2.2.7"); GB.DebugPoll(0.1)
+        else say("Debug chat off; quiet recording continues.") end
+    elseif cmd == "bank" then GB.OpenBank()
     elseif cmd == "recover" then GB.RecoverControllerFocus()
     elseif cmd == "notice" then
         DB.notice=not DB.notice;GB.UpdateFocusNotice()
         say("Focus notice "..(DB.notice and "on." or "off."))
-    elseif cmd == "bindcancel" then GB.CancelControllerBind()
+    elseif cmd == "bindcancel" then GB.CloseActionPicker(true)
     elseif cmd == "" or cmd == "help" then
         say("/aquifer toggle - open or close the bag (also /aq)")
         say("/aquifer settings - settings window")
         say("/aq bank or /aqb - read-only bank memory (visit your bank to save it)")
-        say("Bind: press your normal Bags button, choose the item, then More Actions > Bind to Action Bar; /aq bindcancel returns here.")
+        say("Bind: the d-pad picks an action slot, [X] places, [O] cancels, L2/R2 changes page.")
         say("/aq recover - restore Bags controls; /aq notice - toggle the optional focus notice")
-        say("/aq bindcancel - return from Bind after closing Blizzard bags and dialog")
+        say("/aq bindcancel - close the action-slot picker")
         say("/aquifer minimap on|off - minimap icon")
         say("/aquifer search word - grey out other items")
         say("/aquifer cols 8 - slots per row (4 to 20)")
@@ -1557,19 +2005,20 @@ SlashCmdList.AQUIFER = slash
 
 -- ---------- events ----------
 local ev = CreateFrame("Frame", "AquiferEvents")
-local bindPollElapsed = 0
 ev:SetScript("OnUpdate", function(_, elapsed)
-    if bindHandoff and GB.UpdateFocusNotice then GB.UpdateFocusNotice() end
-    if not bindHandoff then return end
-    bindPollElapsed = bindPollElapsed + (elapsed or 0)
-    if bindPollElapsed >= 0.1 then bindPollElapsed = 0; GB.PollControllerBind() end
+    GB.DebugPoll(elapsed)
 end)
 for _, e in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "BAG_UPDATE", "BAG_UPDATE_DELAYED",
-    "ITEM_LOCK_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_MONEY", "BAG_UPDATE_COOLDOWN", "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do ev:RegisterEvent(e) end
+    "ITEM_LOCK_CHANGED", "CURSOR_CHANGED", "ACTIONBAR_SLOT_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_MONEY", "BAG_UPDATE_COOLDOWN", "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do ev:RegisterEvent(e) end
 ev:SetScript("OnEvent", function(_, e, a1, a2)
-    if (e == "ADDON_ACTION_BLOCKED" or e == "ADDON_ACTION_FORBIDDEN") and bindHandoff and a1 == addonName then
+    if e=="CURSOR_CHANGED" or e=="ACTIONBAR_SLOT_CHANGED" or e=="PLAYER_REGEN_DISABLED" or e=="PLAYER_REGEN_ENABLED" then GB.DebugTrace(e,a1) end
+    if (e == "ADDON_ACTION_BLOCKED" or e == "ADDON_ACTION_FORBIDDEN") and a1 == addonName then
         DB.bindBlocked = { event = e, action = tostring(a2 or "unknown") }
-        say2("Bind blocked at " .. DB.bindBlocked.action .. ". This is saved in /aquifer probe.")
+        if bindHandoff then
+            if bindCursorBusy() and ClearCursor then ClearCursor() end
+            GB.CloseActionPicker(true)
+        end
+        say2("Placement blocked. The bug report has the details.")
         return
     end
     if e == "ADDON_LOADED" and a1 == addonName then
@@ -1587,10 +2036,13 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
             end
         end
         DB = AquiferDB
+        -- Preserve the captured ring, but stop the diagnostic build's enabled flag once.
+        if DB.debugBuild~="2.2.7" then DB.debugEnabled=false; DB.debugBuild="2.2.7" end
         if type(DB.minimap) ~= "table" then DB.minimap = {} end
         for k, v in pairs(MM_DEFAULT) do if DB.minimap[k] == nil then DB.minimap[k] = v end end
         for k, v in pairs(DEFAULTS) do if DB[k] == nil then DB[k] = v end end
         GB.DB = DB
+        GB.DebugTrace("addon loaded","2.2.7")
     elseif e == "PLAYER_LOGIN" then
         DB = AquiferDB or DB
         build(); buildMinimap(); buildSettings(); hookAll()
@@ -1599,6 +2051,10 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
         hoverSlot=nil; GB.HideSlotTooltip()
         if frame then GB.SetEsc(false) end
     elseif e == "PLAYER_REGEN_ENABLED" then
+        if pickerAttrStuck then
+            pickerAttrStuck = false
+            if nav then SecureHandlerExecute(nav, "self:SetAttribute('bindinghandoff', nil); self:RunAttribute('rebind')") end
+        end
         if frame then GB.SetEsc(true) end
         if pendingFocusRemoval then GB.UnregisterControllerFocus() end
         if frame and frame:IsShown() then GB.RegisterControllerFocus(); GB.RefreshInteraction() end

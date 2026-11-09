@@ -61,7 +61,7 @@ function M:StopMovingOrSizing() self.moving=false end
 function M:ClearBindings() self.bindings={} end
 function M:ClearBinding(k) self.bindings[k]=nil end
 function M:SetBindingClick(p,key,target,button) self.bindings[key]={target,button} end
-for _,k in ipairs({'SetFrameStrata','SetClampedToScreen','SetMovable','EnableMouse','RegisterForDrag','SetBackdrop','SetBackdropColor','SetScale','SetTexCoord','SetDesaturated','SetHighlightTexture','SetAllPoints','SetAutoFocus','SetMaxLetters','ClearFocus','SetVertexColor','SetTextColor'}) do M[k]=function() end end
+for _,k in ipairs({'SetFrameStrata','SetClampedToScreen','SetMovable','EnableMouse','RegisterForDrag','SetBackdrop','SetBackdropColor','SetScale','SetTexCoord','SetDesaturated','SetHighlightTexture','SetAllPoints','SetAutoFocus','SetMaxLetters','ClearFocus','SetVertexColor','SetTextColor','SetMultiLine','SetFontObject','SetScrollChild','SetFocus','HighlightText'}) do M[k]=function() end end
 CreateFrame=frame
 UIParent=frame('Frame','UIParent')
 UISpecialFrames={}; SlashCmdList={}
@@ -93,12 +93,44 @@ C_Container={
   GetContainerItemInfo=function(b,s) return items[b..':'..s] end,
   PickupContainerItem=function(b,s) picked={b,s} end,
 }
+-- Action bar: slots hold {type,id,texture}; PlaceAction is only blocked in combat.
+local actionSlots={}
+local actionBarPage=1
+local placedCalls={}
+function GetActionInfo(slot) local a=actionSlots[slot]; if a then return a.type,a.id,a.subtype end end
+function GetActionTexture(slot) local a=actionSlots[slot]; return a and a.texture end
+function GetActionBarPage() return actionBarPage end
+function PlaceAction(slot)
+  assert(not combat,'PlaceAction is blocked in combat')
+  placedCalls[#placedCalls+1]=slot
+end
+-- Gamepad cross-bar mapping used by the action-slot picker.
+local bindingKeys={
+  GAMEPADACTIONBUTTON1="PADDLEFT",GAMEPADACTIONBUTTON2="PADDUP",GAMEPADACTIONBUTTON3="PADDRIGHT",GAMEPADACTIONBUTTON4="PADDDOWN",
+  GAMEPADACTIONBUTTON5="PAD3",GAMEPADACTIONBUTTON6="PAD4",GAMEPADACTIONBUTTON7="PAD1",GAMEPADACTIONBUTTON8="PAD2",
+  GAMEPADLEFTMOD="PADLTRIGGER",GAMEPADRIGHTMOD="PADRTRIGGER",
+}
+function GetBindingKey(command,priority) return bindingKeys[command] end
+function GetBindingText() return nil end
+Constants={GamepadActionBarConstants={
+  NUM_SLOTS_PER_GAMEPAD_ACTION_BAR_GROUP=4,NUM_GROUPS_PER_GAMEPAD_ACTION_BAR=2,
+  NUM_PAGEABLE_BARS_IN_GAMEPAD_ACTION_BAR_PAGE_UNIT=4,
+  NUM_PAGEABLE_SLOTS_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT_STANDARD_PAGE=32,
+  NUM_RESERVED_SLOTS_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT=4,
+  NUM_PAGES_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT=4,
+  NUM_STANDARD_PAGES_PER_GAMEPAD_ACTION_BAR_PAGE_UNIT=3,
+}}
+local gpFirstStorage=100
+C_GamepadUI={GetFirstGamepadActionStorageSlotIndex=function() return gpFirstStorage end}
 GameTooltip=frame('Frame','GameTooltip')
 function GameTooltip:SetOwner(owner) self.owner=owner end
 function GameTooltip:GetOwner() return self.owner end
 function GameTooltip:SetBagItem(bag,slot) self.bag,self.slot=bag,slot end
 local hooks={}
-function hooksecurefunc(name,fn) local o=_G[name]; _G[name]=function(...) local r=o(...); fn(...); return r end end
+function hooksecurefunc(object,name,fn)
+ if type(object)=='string' then fn=name;name=object;object=_G end
+ local o=object[name];object[name]=function(...) local r=o(...);fn(...);return r end
+end
 local defaultShown=false
 for _,n in ipairs({'ToggleAllBags','ToggleBackpack','OpenAllBags','CloseAllBags'}) do
     _G[n]=function() if n:find('Close') then defaultShown=false else defaultShown=not defaultShown or n:find('Open')~=nil end
@@ -119,6 +151,7 @@ function date(fmt,t) return os.date(fmt,t) end
 function RegisterStateDriver(f,state,condition) f.stateDriver={state,condition} end
 BANK_CONTAINER=-1; NUM_BANKBAGSLOTS=7; REAGENTBANK_CONTAINER=-3
 assert(loadfile('Bank.lua'))('Aquifer')
+assert(loadfile('BugReport.lua'))('Aquifer')
 AquiferDB={columns=8}
 emit('ADDON_LOADED','Aquifer')
 emit('PLAYER_LOGIN')
@@ -366,106 +399,139 @@ nav.attrs.focus=2; padclick('PAD4')
 assert(im.visible and not bm.visible and visibleEntries()=='equip,bind,link,destroy',visibleEntries())
 local eqb=named.AquiferMenu_item_equip; assert(eqb.attrs.type=='macro' and eqb.attrs.macrotext=='/use 0 2')
 im.bindings.PAD1={eqb,'LeftButton'}; macroLog={}; padclick('PAD1'); assert(macroLog[1]=='/use 0 2' and not im.visible)
--- Bind handoff round 3: only the PLAYER opens stock bags. No addon-driven
--- stock click, focus, or BindItem calls; transient hides never end the session.
+-- 2.2.8 gamepad picker: gamepad storage slots, real button labels, cross-bar layout.
 do
-  local ownerFrame=named.AquiferFrame
-  local bindButton=named.AquiferMenu_item_bind
-  local iconRefreshes=0
-  local stock={shown=false}
-  function stock:IsShown() return self.shown end
-  stock.BindItem=function() error('addon must never call BindItem') end
-  stock.HookScript=function() error('must not hook stock bind scripts') end
-  GamepadActionBarEditFrame=stock
-  securecallfunction=function() error('securecall is not an insecure-to-secure bridge') end
-  GamepadMode={FrameControlsManager=setmetatable({}, {__index=function() error('addon touched stock focus manager') end})}
-  local function preferredTarget()
-    assert(secure,'ADDON_ACTION_FORBIDDEN / SetPreferredGamepadInteractTarget()')
-    iconRefreshes=iconRefreshes+1
+ local held=false
+ local oldPickup,oldCursor,oldClear=C_Container.PickupContainerItem,CursorHasItem,ClearCursor
+ CursorHasItem=function() return held end
+ ClearCursor=function() error('normal picker path must not touch the cursor') end
+ local testPickup=function(b,s) assert(b==0 and s==1);held=true;emit('CURSOR_CHANGED') end
+ C_Container.PickupContainerItem=testPickup
+ items['0:1'].itemID=101
+ actionSlots={[101]={type='spell',id=78,texture='spell1'}}
+ placedCalls={}
+ local realPlace=PlaceAction
+ PlaceAction=function(slot)
+  assert(not combat,'PlaceAction is blocked in combat');assert(held,'place needs the picked-up item')
+  held=false;placedCalls[#placedCalls+1]=slot
+  actionSlots[slot]={type='item',id=101,texture='milk'};emit('ACTIONBAR_SLOT_CHANGED',slot)
+ end
+ GamepadActionBarEditFrame={IsShown=function() return false end,BindItem=function() error('unsafe native editor call') end}
+ local bindButton=named.AquiferMenu_item_bind
+ GB.Open();nav.attrs.focus=1;padclick('PAD1')
+ bindButton.scripts.PostClick(bindButton,'LeftButton',true)
+ assert(not held and not GB.IsBindingHandoff())
+ bindButton.scripts.PostClick(bindButton,'LeftButton',false)
+ local pg,sel,slot,active,count=GB.PickerState()
+ assert(GB.IsBindingHandoff() and named.AquiferActionPicker.visible and active)
+ assert(pg==1 and count==28,'tiles '..tostring(count))
+ local pb=named.AquiferActionPicker.bindings
+ assert(pb.PAD1[1]==named.AquiferPickerPlace and pb.PAD2[1]==named.AquiferPickerCancel)
+ assert(pb.PADLSHOULDER[1]==named.AquiferPickerPrevPage and pb.PADRSHOULDER[1]==named.AquiferPickerNextPage,'page keys')
+ local function labelFor(storage)
+  for i=1,count do local b=named['AquiferPickerSlot'..i]; if b.slot==storage then return b.label:GetText(),b end end
+ end
+ local l100=labelFor(100); assert(l100 and l100:find('\d') and not l100:find('L2'),tostring(l100))
+ local l104=labelFor(104); assert(l104 and l104:find('L2') and l104:find('\d'),tostring(l104))
+ local l112=labelFor(112); assert(l112 and l112:find('R2') and l112:find('\d'),tostring(l112))
+ local l120=labelFor(120); assert(l120 and l120:find('L2') and l120:find('R2'),tostring(l120))
+ local plain=0
+ for i=1,count do local t=named['AquiferPickerSlot'..i].label:GetText(); if not t:find('L2') and not t:find('R2') then plain=plain+1 end end
+ assert(plain==4,'top bar bindable slots '..tostring(plain))
+ assert(slot==101,'first tile is the top up button, got '..tostring(slot))
+ assert(named.AquiferPickerSlot1.icon.texture=='spell1')
+ assert(not held,'opening the picker must not pick the item up')
+ local _,b104=labelFor(104); b104.scripts.OnClick(b104,'LeftButton',false)
+ GB.PickerMove('right'); _,_,slot=GB.PickerState(); assert(slot==106,'right from 104 gave '..tostring(slot))
+ GB.PickerMove('up'); _,_,slot=GB.PickerState(); assert(slot==105,'up from 106 gave '..tostring(slot))
+ local nextBtn=named.AquiferPickerNextPage
+ nextBtn.scripts.PostClick(nextBtn,'LeftButton',false)
+ pg,_,slot=GB.PickerState(); assert(pg==2,'page '..tostring(pg))
+ assert(labelFor(128) and not labelFor(100),'page 2 storage')
+ local target=select(3,GB.PickerState())
+ local placeBtn=named.AquiferPickerPlace
+ placeBtn.scripts.PostClick(placeBtn,'LeftButton',false)
+ active=select(4,GB.PickerState())
+ assert(not active and #placedCalls==1 and placedCalls[1]==target,'placed '..tostring(placedCalls[1])..' target '..tostring(target))
+ assert(not held and GB.IsOpen() and nav.bindings.PADDUP)
+ assert(GB.OpenActionPicker(named.AquiferSlot1))
+ local cancelBtn=named.AquiferPickerCancel
+ cancelBtn.scripts.PostClick(cancelBtn,'LeftButton',false)
+ assert(not GB.IsBindingHandoff() and #placedCalls==1 and not held)
+ assert(GB.OpenActionPicker(named.AquiferSlot1))
+ combat=true
+ placeBtn.scripts.PostClick(placeBtn,'LeftButton',false)
+ assert(#placedCalls==1 and GB.IsBindingHandoff())
+ cancelBtn.scripts.PostClick(cancelBtn,'LeftButton',false)
+ assert(GB.IsBindingHandoff())
+ combat=false
+ cancelBtn.scripts.PostClick(cancelBtn,'LeftButton',false); assert(not GB.IsBindingHandoff())
+ -- unbound gamepad button disappears
+ bindingKeys.GAMEPADACTIONBUTTON2=nil
+ assert(GB.OpenActionPicker(named.AquiferSlot1)); emit('UPDATE_BINDINGS')
+ local c2=select(5,GB.PickerState()); assert(c2==24,'count '..tostring(c2)..' (one position per bar)')
+ local hasUp=false
+ for i=1,c2 do if named['AquiferPickerSlot'..i].label:GetText():find('\e') then hasUp=true end end
+ assert(not hasUp,'unbound button shown')
+ bindingKeys.GAMEPADACTIONBUTTON2='PADDUP'; emit('UPDATE_BINDINGS')
+ -- missing right cross-bar modifier hides the right and bottom bars
+ bindingKeys.GAMEPADRIGHTMOD=nil; emit('UPDATE_BINDINGS')
+ assert(select(5,GB.PickerState())==12,'right/bottom bars stay visible without their modifier')
+ bindingKeys.GAMEPADRIGHTMOD='PADRTRIGGER'; emit('UPDATE_BINDINGS')
+ GB.CloseActionPicker(true)
+ -- the client's own label art wins when available
+ GetBindingText=function(k) return 'G:'..k end
+ assert(GB.OpenActionPicker(named.AquiferSlot1))
+ local t1=named.AquiferPickerSlot1.label:GetText(); assert(t1:find('G:PADDUP',1,true),tostring(t1))
+ GetBindingText=function() return nil end
+ _G.KEY_PAD1='|A:Gamepad_Gen_1_64:24:24|a'
+ emit('UPDATE_BINDINGS')
+ local found=false
+ for i=1,select(5,GB.PickerState()) do
+  local b=named['AquiferPickerSlot'..i]
+  if b.label:GetText():find('Gamepad_Gen_1_64',1,true) then found=true
+   local txt=b.label:GetText()
+   assert(txt:find(':10:10|a',1,true) or txt:find(':11:11|a',1,true),tostring(txt))
   end
-  local oldHide=ContainerFrame1.scripts.OnHide
-  ContainerFrame1.scripts.OnHide=preferredTarget
-  ContainerFrame1:Show();assert(not ContainerFrame1.visible and iconRefreshes>0)
-  for _,name in ipairs({'MainMenuBarBackpackButton','CharacterBag1Slot'}) do
-    local native=frame('Button',name)
-    native.Click=function() error('addon must not delegate a stock bag click') end
-  end
-  local originalPrint, originalBindingKey=print,GetBindingKey
-  local prompts={}
-  print=function(msg) prompts[#prompts+1]=msg end
-  GetBindingKey=function(action) if action=='OPENALLBAGS' then return 'B' end end
-  nav.attrs.focus=1;padclick('PAD1')
-  im.bindings.PAD1={bindButton,'LeftButton'}
-  for _,owner in ipairs({nav,im,bm}) do
-    owner.bindings.PADLSHOULDER={'old'};owner.bindings['PADLSHOULDER-PAD1']={'old'}
-    owner.bindings['PADRSHOULDER-PAD4']={'old'}
-  end
-  assert(not bindButton.scripts.PreClick,'Bind must have only one callback')
-  bindButton.scripts.PostClick(bindButton,'LeftButton',true)
-  bindButton.scripts.PostClick(bindButton,'RightButton',false)
-  assert(ownerFrame.visible and #prompts==0,'wrong click phase started handoff')
-  padclick('PAD1')
-  assert(not ContainerFrame1.visible and not ownerFrame.visible and not stock.shown)
-  assert(bindButton.attrs.type==nil and bindButton.attrs.clickbutton==nil,'stock delegation remains')
-  assert(#prompts==1 and prompts[1]:find('Bags key %(B%)') and prompts[1]:find('bag 0, slot 1'))
-  local function released()
-    assert(not ownerFrame.visible and not im.visible and not bm.visible)
-    assert(nav.attrs.bindinghandoff==1)
-    for _,owner in ipairs({nav,im,bm}) do assert(next(owner.bindings)==nil,'still captures input') end
-  end
-  local function duplicateAndPoll()
-    bindButton.scripts.PostClick(bindButton,'LeftButton',false)
-    assert(not GB.StartControllerBind(named.AquiferSlot1))
-    for i=1,20 do named.AquiferEvents.scripts.OnUpdate(nil,.2) end
-    GB.Open();GB.Refresh();GB.SetPad(true);SecureHandlerExecute(nav, "self:RunAttribute('rebind')")
-    -- Stale menu-open/move callbacks must not reinstall PAD1 after handoff.
-    click(named.AquiferMenuOpen_x,'up');click(named.AquiferMenuPad_itemdown,'up')
-    released()
-  end
-  duplicateAndPoll();assert(#prompts==1)
-  -- Player presses Bags; all replacement hooks must leave it open.
-  secure=true;OpenAllBags();secure=false
-  assert(ContainerFrame1.visible);duplicateAndPoll();assert(ContainerFrame1.visible and #prompts==1)
-  -- Reproduce the observed flash: hidden for several frames, duplicate callback,
-  -- then another stock bag shown. Never auto-restore or print a second hint.
-  secure=true;CloseAllBags();secure=false
-  duplicateAndPoll();assert(#prompts==1)
-  secure=true;ToggleAllBags();secure=false
-  assert(ContainerFrame1.visible);duplicateAndPoll();assert(ContainerFrame1.visible)
-  -- Only a new player input invokes the native bind/focus path.
-  secure=true;preferredTarget();stock.shown=true;secure=false
-  emit('ADDON_ACTION_BLOCKED','AnotherAddon','OtherCall');assert(not AquiferDB.bindBlocked)
-  emit('ADDON_ACTION_FORBIDDEN','Aquifer','SetPreferredGamepadInteractTarget')
-  assert(AquiferDB.bindBlocked.action=='SetPreferredGamepadInteractTarget')
-  GB.CancelControllerBind();released();assert(stock.shown and ContainerFrame1.visible)
-  stock.shown=false;GB.PollControllerBind();released()
-  GB.CancelControllerBind();released();assert(ContainerFrame1.visible)
-  secure=true;CloseAllBags();secure=false
-  GB.PollControllerBind();released() -- explicit return is required, even now
-  combat=true;GB.CancelControllerBind();GB.PollControllerBind();released()
-  combat=false;named.AquiferEvents.scripts.OnUpdate(nil,.2)
-  assert(ownerFrame.visible and nav.bindings.PAD1 and not nav.attrs.bindinghandoff)
-  -- Unbound Bags key: plain fallback hint, no guessed controller chord.
-  GetBindingKey=nil
-  assert(GB.StartControllerBind(named.AquiferSlot1))
-  assert(prompts[#prompts]:find('Press your normal Bags button'))
-  GB.Slash('bindcancel');assert(ownerFrame.visible and nav.bindings.PAD1)
-  -- Disabled addon does not reopen on return; invalid starts are harmless.
-  assert(GB.StartControllerBind(named.AquiferSlot1));GB.SetEnabled(false)
-  GB.CancelControllerBind();assert(not ownerFrame.visible and next(nav.bindings)==nil)
-  GB.SetEnabled(true);GB.Open()
-  combat=true;assert(not GB.StartControllerBind(named.AquiferSlot1));combat=false
-  stock.shown=true;assert(not GB.StartControllerBind(named.AquiferSlot1));stock.shown=false
-  items['0:1'].itemID=nil;assert(not GB.StartControllerBind(named.AquiferSlot1));items['0:1'].itemID=101
-  CursorHasItem=function() return true end;assert(not GB.StartControllerBind(named.AquiferSlot1));CursorHasItem=nil
-  assert(ownerFrame.visible and nav.bindings.PAD1)
-  -- Normal replacement is restored after explicit cancellation.
-  ContainerFrame1:Show();assert(not ContainerFrame1.visible)
-  print=originalPrint;GetBindingKey=originalBindingKey
-  ContainerFrame1.scripts.OnHide=oldHide
-  GamepadActionBarEditFrame=nil;GamepadMode=nil;securecallfunction=nil
+ end
+ assert(found,'KEY_ markup used')
+ _G.KEY_PAD1=nil
+ -- if the client reports no cross-bar bindings at all, the standard pad positions are shown
+ local savedKeys={}
+ for i=1,8 do savedKeys[i]=bindingKeys['GAMEPADACTIONBUTTON'..i]; bindingKeys['GAMEPADACTIONBUTTON'..i]=nil end
+ emit('UPDATE_BINDINGS')
+ local c4=select(5,GB.PickerState()); assert(c4==28,'fallback positions '..tostring(c4))
+ for i=1,8 do bindingKeys['GAMEPADACTIONBUTTON'..i]=savedKeys[i] end
+ emit('UPDATE_BINDINGS')
+ -- no gamepad storage API: no tiles, and placement refuses
+ C_GamepadUI=nil; emit('UPDATE_BINDINGS')
+ assert(select(5,GB.PickerState())==0)
+ local before=#placedCalls
+ placeBtn.scripts.PostClick(placeBtn,'LeftButton',false)
+ assert(#placedCalls==before)
+ C_GamepadUI={GetFirstGamepadActionStorageSlotIndex=function() return gpFirstStorage end}
+ emit('UPDATE_BINDINGS'); GB.CloseActionPicker(true)
+ -- failed pickup and silent refusal put the item back
+ C_Container.PickupContainerItem=function() end
+ assert(GB.OpenActionPicker(named.AquiferSlot1))
+ placeBtn.scripts.PostClick(placeBtn,'LeftButton',false)
+ assert(not GB.IsBindingHandoff())
+ C_Container.PickupContainerItem=testPickup
+ local quietPlace=PlaceAction; PlaceAction=function() end
+ local restored=false; ClearCursor=function() restored=true;held=false end
+ assert(GB.OpenActionPicker(named.AquiferSlot1))
+ placeBtn.scripts.PostClick(placeBtn,'LeftButton',false)
+ assert(not GB.IsBindingHandoff() and restored and not held)
+ PlaceAction=quietPlace
+ ClearCursor=function() error('normal picker path must not touch the cursor') end
+ local report=GB.BuildBugReport()
+ assert(report:find('action picker open') and report:find('action slot place') and report:find('action picker cancel'))
+ assert(not report:find('SHIFT%-B') and not report:find('Bags key'))
+ PlaceAction=realPlace
+ C_Container.PickupContainerItem,CursorHasItem,ClearCursor=oldPickup,oldCursor,oldClear
+ GamepadActionBarEditFrame=nil
 end
-io.stdout:write('PASS: player-opened native bag handoff; duplicate/phase guards; transient hide/reopen cannot restore replacement; all override owners released; no stock click/focus/bind calls; explicit return and combat deferral\n')
+io.stdout:write('PASS: gamepad action-slot picker (storage slots, button labels, grouping, paging, place, cancel, combat, restore, bug-report evidence)\n')
 
 local oldprint=print
 -- Use/Equip secure buttons: up-click mode, type+macrotext set in the snippet BEFORE the click is processed
@@ -747,11 +813,15 @@ do
   assert(nav.bindings.PAD1 and nav.attrs.focus==6 and held=='held-item')
   GB.Close();GB.Open();assert(nav.attrs.focus==6,'reopening reset the selection')
   items['0:6']=nil
-  -- Bind still relinquishes the registered panel and returns only on request.
+  -- Action-slot picker keeps the registered panel and never touches the cursor.
   held=nil;items['0:1']={iconFileID=99,itemID=99,hyperlink='[Bind test]',stackCount=1}
-  GB.Open();assert(GB.StartControllerBind(named.AquiferSlot1))
-  assert(not GB.IsOpen() and #manager.shownFrames==0 and next(nav.bindings)==nil)
-  GB.CancelControllerBind();assert(GB.IsOpen() and manager.focusedFrame==named.AquiferFrame)
+  C_Container.PickupContainerItem=function() held='held-item' end
+  ClearCursor=function() error('picker must not clear the cursor on this path') end
+  GB.Open();assert(GB.OpenActionPicker(named.AquiferSlot1))
+  assert(GB.IsOpen() and manager.focusedFrame==named.AquiferFrame and GB.IsBindingHandoff())
+  assert(next(nav.bindings)==nil and named.AquiferActionPicker.bindings.PAD1)
+  GB.CloseActionPicker(true)
+  assert(GB.IsOpen() and manager.focusedFrame==named.AquiferFrame and not GB.IsBindingHandoff())
   GB.Close()
   assert(wrappedCalls>=12 and nativeCalls>0 and not named.AquiferFrame.useCustomNavigation)
   CursorHasItem=nil;ClearCursor=nil;C_Container.PickupContainerItem=previousPickup
@@ -859,3 +929,50 @@ do
  nav.attrs.padnav=1;GB.UpdateFooter();GB.Close();assert(not GameTooltip:IsShown())
 end
 io.stdout:write('PASS: selected-item tooltip, mouse handoff, empty slots, focus loss, foreign tooltip ownership, combat and close cleanup\n')
+
+
+-- Opt-in debug trace: preserved bounded log, stock posthooks and zero logging when disabled.
+do
+ assert(not AquiferDB.debugEnabled)
+ local before=#msgs;emit('CURSOR_CHANGED');assert(#msgs==before)
+ local called=0
+ local manager={FrameShown=function() called=called+1;return 42 end,FrameHidden=function() called=called+1 end}
+ GamepadMode={FrameControlsManager=manager};SmartNavigationSecureHelper={}
+ GB.Slash('debug');assert(AquiferDB.debugEnabled)
+ assert(manager:FrameShown(named.AquiferFrame)==42 and called==1)
+ manager:FrameHidden(named.AquiferFrame);assert(called==2)
+ assert(AquiferDB.debugLog[#AquiferDB.debugLog]:find('manager.FrameHidden'))
+ emit('ACTIONBAR_SLOT_CHANGED',7);assert(AquiferDB.debugLog[#AquiferDB.debugLog]:find('ACTIONBAR_SLOT_CHANGED'))
+ for i=1,205 do GB.DebugTrace('ring',i) end
+ assert(#AquiferDB.debugLog==200 and AquiferDB.debugLog[1]:find('ring 6 '))
+ local log=AquiferDB.debugLog;local seq=AquiferDB.debugSequence
+ emit('ADDON_LOADED','Aquifer');assert(AquiferDB.debugLog==log and AquiferDB.debugSequence==seq+1)
+ GB.Slash('debug');before=#msgs;seq=AquiferDB.debugSequence
+ emit('CURSOR_CHANGED');manager:FrameShown(named.AquiferFrame);GB.DebugPoll(.2)
+ assert(#msgs==before and AquiferDB.debugSequence>seq)
+ GamepadMode=nil;SmartNavigationSecureHelper=nil
+end
+io.stdout:write('PASS: debug opt-in, manager posthook return preservation, event lines, 200-line persistence and disabled silence\n')
+
+
+-- Quiet reporting captures events, limits output and removes character/realm text.
+do
+ local previousBuild,previousLocale,previousCVar,previousAddons=GetBuildInfo,GetLocale,GetCVar,C_AddOns
+ GetBuildInfo=function() return '1.60.1','12345','date',16001 end
+ GetLocale=function() return 'enUS' end;GetCVar=function() return '1' end
+ C_AddOns={GetAddOnMetadata=function() return '2.2.6' end,GetNumAddOns=function() return 3 end,
+ GetAddOnInfo=function(i) return ({'Bagnon','OtherBag','Unrelated'})[i] end,IsAddOnLoaded=function(n) return n~='OtherBag' end}
+ AquiferDB.debugEnabled=false;local before=#msgs
+ for i=1,120 do GB.DebugTrace('quiet',i) end
+ assert(#msgs==before)
+ GB.DebugTrace('privacy',UnitName('player')..' / '..GetRealmName())
+ local text=GB.BuildBugReport()
+ assert(text:find('1.60.1') and text:find('16001') and text:find('enUS') and text:find('Gamepad: on') and text:find('Bagnon'))
+ assert(not text:find('OtherBag') and not text:find('Unrelated'))
+ assert(not text:find(UnitName('player'),1,true) and not text:find(GetRealmName(),1,true))
+ local events=0;for line in text:gmatch('[^\n]+') do if line:match('^%d+ ') then events=events+1 end end;assert(events==100)
+ GB.Slash('bug');assert(named.AquiferBugReport:IsShown() and named.AquiferBugReportText:GetText()==text)
+ named.AquiferBugReportSelectAll.scripts.OnClick();named.AquiferBugReportText.scripts.OnEscapePressed();assert(not named.AquiferBugReport:IsShown())
+ GetBuildInfo,GetLocale,GetCVar,C_AddOns=previousBuild,previousLocale,previousCVar,previousAddons
+end
+io.stdout:write('PASS: quiet bug-report recording, 100-event export, privacy redaction, addon filtering and copy-window flow\n')

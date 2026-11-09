@@ -33,7 +33,7 @@ Labels are PlayStation first, Xbox in brackets.
 | **Square** (X) | Quick action: Equip if it is gear, otherwise Use (the footer shows which) | Nothing |
 | **Circle** (B) | Close the menu, then the bag | Close the menu, then the bag |
 
-Turn controller movement off with `/aq pad off` or the **Controller d-pad in bag** checkbox.
+The **Controller d-pad in bag** checkbox controls d-pad movement.
 
 ### Move items between windows
 
@@ -51,15 +51,14 @@ In Aquifer, **X** (A) changes with the open window:
 
 To choose a particular destination slot at a bank, vendor or trade window, use **Triangle → Pick up**, then **L2/R2** to the other window and **X** to place it. To bring an item back, pick it up in the stock window, switch to Aquifer, and press **X** on a bag slot. While holding an item, X places it rather than selling or using another item. Away from these windows, X still opens the normal item menu.
 
-### Bind an item to an action bar
+### Place an item on an action bar with the controller
 
-WoW only allows **Bind to Action Bar** from Blizzard's own bags, so Aquifer hands this step over to them.
+1. Select an item and press **[Tri]**, then choose **Bind** with **[X]**.
+2. A picker opens showing gamepad action buttons, not slot numbers. Each tile is labelled with the button or combination that fires it (**X**, **L2 + X**, **R2 + Up**, and so on) and shows the current icon if that button already has an action.
+3. Tiles are grouped like the on-screen bars: top, left (left modifier), right (right modifier) and bottom (both). **D-pad** moves the yellow box; the two page buttons shown at the bottom switch page 1-3.
+4. Press **[X]** to place the item on the selected button, or **[O]** to cancel. Aquifer closes the picker and returns to the bag with the same item selected.
 
-1. Outside combat, choose **Bind** in the item menu. Aquifer closes and lets go of the controller.
-2. Press your **Bags** button yourself. The hint shows the key you have set. Blizzard's bag opens.
-3. Select the named item, then choose **More Actions → Bind to Action Bar**.
-4. Pick the action bar and press the button you want to bind it to.
-5. Close Blizzard's bags and dialog, then type **`/aq bindcancel`** to return to Aquifer. In combat, the return waits until combat ends.
+Out of combat only. During combat the picker stays open and says it waits. It does not use the mouse cursor or open the stock Bind editor.
 
 ## Mouse
 
@@ -80,9 +79,9 @@ The button sits on the outer edge of the minimap.
 | Drag | Slide the button around the edge of the minimap (the spot is saved) |
 | Hover | Shows what the button does |
 
-Hide it with `/aq minimap off` or the **Hide minimap icon** checkbox.
+The **Hide minimap icon** checkbox hides it.
 
-## Commands
+## Optional power-user and debug commands
 
 Every command works with `/aquifer` or the short `/aq`.
 
@@ -101,7 +100,7 @@ Every command works with `/aquifer` or the short `/aq`.
 | `/aq default on` / `off` | `off` uses Aquifer; `on` brings the normal bags back |
 | `/aq reset` | Put the window back at its starting spot |
 | `/aq config` | Show your current settings in chat |
-| `/aq bindcancel` | Return to Aquifer after a Bind handoff |
+| `/aq bindcancel` | Close the action-slot picker |
 
 ## Settings window
 
@@ -156,9 +155,23 @@ its selection without clearing a held item or changing stock windows. Recovery
 requested during combat waits silently until combat ends. Aquifer's d-pad and
 face-button overrides pause during combat, then follow the current window again.
 
-After **Bind**, use your normal Bags button and complete the action in the stock
-bags. Close the stock bags and binding dialog, then use `/aq bindcancel` to return.
-This never presses Bind or reopens bags while the stock binding UI is active.
+After **Bind**, use the d-pad to pick an action slot and **[X]** to place; **[O]** cancels,
+and L2/R2 switches the page. Aquifer returns to the bag with the same item selected.
 
 Native controller focus and taint still need an in-game check; the offline tests
 exercise the exported stock focus manager and the contextual action guards.
+
+## Report a bug
+
+After a problem, type **`/aq bug`**. Click **Select all**, then **Ctrl+C**. Paste the report at **github.com/waterys419/Aquifer/issues**, together with what you did and what you expected.
+
+The report includes the addon/client versions, locale, gamepad setting, detected loaded bag addons and the last 100 events. A small 200-event buffer records quietly without `/aq debug`. Character and realm names are replaced with placeholders; account information, chat messages and inventory contents are not collected for the report. `/aq debug` only toggles extra chat output. Reports are never sent automatically.
+
+## Known issues
+
+- **In combat, Aquifer pauses controller input.** This is a Blizzard restriction. Your selection comes back when combat ends.
+- **Identical stacks:** if items move while you switch windows, the yellow selection can jump to another stack of the same item.
+- **Only tested on WoW Forever (1.60.1) with gamepad mode on.** Other clients, or other bag addons running at the same time, may conflict with Aquifer.
+- **If Aquifer ever stops responding to your controller,** type `/reload` to restore it.
+
+**Found a bug?** Type `/aq bug`, copy the text, and paste it with the steps you took at https://github.com/waterys419/Aquifer/issues
