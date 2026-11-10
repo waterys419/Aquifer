@@ -102,3 +102,6 @@ Open it with `/aq settings` or right-click the minimap button.
 See [LICENSE](LICENSE).
 
 Author: Audrey
+
+## Known issues
+See [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
